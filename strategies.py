@@ -407,6 +407,13 @@ class Devma(Strategy):
     vol_ma = 20    # EMA length on the volatility series (original: 20)
     vol_run = 5    # bars the EMA must rise/fall (original: 5)
 
+    # Robustness-test knobs (not optimized; defaults match the original)
+    band1 = "2D"        # trend step timeframe
+    band2 = "3D"        # HL band timeframe
+    vol_mode = "normal"  # 'normal' | 'off' | 'inverted'
+    direction = "both"   # 'both' | 'long' | 'short'
+    delay = 0            # act on signals this many bars late
+
     GRID = {"vol_ma": [10, 20, 40], "vol_run": [3, 5, 8]}
     WARMUP = 360
 
@@ -414,8 +421,8 @@ class Devma(Strategy):
         o, h, l, c = (self.data.Open.s, self.data.High.s,
                       self.data.Low.s, self.data.Close.s)
 
-        b1 = htf_bands(h, l, c, "2D")   # trend step timeframe
-        b2 = htf_bands(h, l, c, "3D")   # HL band timeframe
+        b1 = htf_bands(h, l, c, self.band1)
+        b2 = htf_bands(h, l, c, self.band2)
         bull, bear = structure_break_signals(o, h, l, c)
 
         # Volatility filter (stand-in for BITMEX:BVOL7D)
@@ -431,6 +438,11 @@ class Devma(Strategy):
         up2, lo2 = b2.upper.to_numpy(), b2.lower.to_numpy()
         mid1, st1 = b1.mid.to_numpy(), b1.state.to_numpy()
         vr, vf = vol_rising.to_numpy(), vol_falling.to_numpy()
+        if self.vol_mode == "off":
+            vr = np.ones(len(cn), dtype=bool)
+            vf = np.ones(len(cn), dtype=bool)
+        elif self.vol_mode == "inverted":
+            vr, vf = vf, vr
 
         long_breakout = (on < up2) & (cn > up2) & (cn > lo2) & ~bear
         long_trend = bull & (mid1 > up2) & vr
@@ -458,19 +470,25 @@ class Devma(Strategy):
         long_close = (((st1 < 0) & bear_rej_mid) | ma_bear_cross | bear_cross) & vf
         short_close = (((st1 > 0) & bull_rej_mid) | ma_bull_cross | bull_cross) & vf
 
-        f = lambda x: x.astype(float)
+        def f(x):
+            x = x.astype(float)
+            if self.delay:
+                x = np.concatenate([np.zeros(self.delay), x[:-self.delay]])
+            return x
         self.sig_long = self.I(lambda: f(long_breakout | long_trend), plot=False)
         self.sig_short = self.I(lambda: f(short_breakout | short_trend), plot=False)
         self.sig_long_close = self.I(lambda: f(long_close), plot=False)
         self.sig_short_close = self.I(lambda: f(short_close), plot=False)
 
     def next(self):
-        if self.sig_long[-1] > 0 and not self.position.is_long:
+        if (self.sig_long[-1] > 0 and self.direction != "short"
+                and not self.position.is_long):
             self.position.close()
-            self.buy(sl=self.data.Low[-1])
-        elif self.sig_short[-1] > 0 and not self.position.is_short:
+            self.buy(sl=min(self.data.Low[-1], self.data.Close[-1] * 0.999))
+        elif (self.sig_short[-1] > 0 and self.direction != "long"
+                and not self.position.is_short):
             self.position.close()
-            self.sell(sl=self.data.High[-1])
+            self.sell(sl=max(self.data.High[-1], self.data.Close[-1] * 1.001))
         elif self.position.is_long and self.sig_long_close[-1] > 0:
             self.position.close()
         elif self.position.is_short and self.sig_short_close[-1] > 0:

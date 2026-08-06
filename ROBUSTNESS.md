@@ -1,3 +1,48 @@
+# Robustness check: DEVMA on daily (added 2026-08-07)
+
+DEVMA passed the four-stage check on both 12h and daily. This battery
+attacks the daily result from nine angles (`python robustness_devma.py`;
+BTC daily 2018–2026, defaults vol_ma=20/vol_run=5, bands 2D/3D, 0.15%
+commission + 0.05% spread unless varied).
+
+| # | Test | Result | Read |
+|---|---|---|---|
+| 1 | Vol-filter sweep (35 combos) | 35/35 profitable, median PF 1.111 | Total plateau — PASS |
+| 2 | Band-timeframe sweep (8 combos) | 8/8 profitable, PF 1.07–1.18 | Structural plateau — PASS |
+| 3 | Vol-gate ablation | normal +2060%; gate off +104%; inverted +145% | The gate IS the edge — PASS |
+| 4 | Cost stress | PF 1.086 even at 0.40%/side | PASS |
+| 5 | Long vs short | Long PF 1.19 (+1119%); short PF 1.03 (+38%) | Long-biased — CAUTION |
+| 6 | Entry delayed one day | PF 1.167 (+1301%) | Timing-insensitive — PASS |
+| 7 | Sub-periods | 2018–20 PF 1.27; 2021–23 PF 1.09; 2024–26 PF 0.995 | **Edge decaying — WARNING** |
+| 8 | Bootstrap (10,000x) | 2.2% chance of overall loss | PASS |
+| 9 | ETH transfer, no re-tuning | PF 1.070, +849% vs +152% buy-and-hold | PASS |
+
+**The ablation (test 3) is the standout.** With the volatility gate
+removed, returns collapse from +2060% to +104%; with the gate inverted
+(enter on falling volatility instead of rising), +145%. The gate isn't
+decoration — "only enter when volatility is expanding" is where most of
+the strategy's edge lives, and it's directional: both wrong versions
+land in the same much-worse place. This also explains the earlier
+finding that the raw breakout signals were real but cost-eaten: DEVMA
+is those signals traded only when conditions favour follow-through.
+
+**The sub-period decay (test 7) is the serious warning.** Each third is
+weaker than the last, and 2024–2026 is breakeven (−3%) while
+buy-and-hold made +46%. The walk-forward folds showed the same shape.
+Everything else in this battery says the strategy was well-built; this
+test says the market it was built for has been fading. A strategy can
+be statistically real *and* past its prime — forward paper-trading is
+the only way to find out which side of that line it's on now.
+
+Everything else: parameter and band plateaus are as clean as they come
+(43/43 profitable configurations), it survives nearly 3x realistic
+costs, a full day's entry delay costs nothing, shorts add little (as
+with Diamond Hands), and the same untouched rules made 5.6x
+buy-and-hold on ETH. Fold-level detail in report_devma_12h.txt and
+report_devma_1d.txt.
+
+---
+
 # Robustness check: Diamond Hands on 4h
 
 The 4h result passed the four-stage honesty check (see ANALYSIS.md). A
