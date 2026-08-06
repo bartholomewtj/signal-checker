@@ -23,6 +23,30 @@ PF = profit factor (gross gains ÷ gross losses; above 1.0 = profitable).
 p = chance that shuffled, pattern-free price data scores as well as the
 real data. Low p means the strategy is reading something real.
 
+## Rerun: Diamond Hands on 4-hour bars (2026-08-07)
+
+Rerunning the sweep reversal on 4h bars (same costs, same pipeline,
+walk-forward windows scaled to match) produced the first full pass:
+
+| | 12h | 4h |
+|---|---|---|
+| Full backtest | +33.6% | +1094.9% (buy & hold +1396.8%) |
+| Out-of-sample return | +41.7% | +119.3% |
+| Out-of-sample PF | 1.030 | 1.085 |
+| Out-of-sample trades | 23 | 42 |
+| p in-sample | 0.413 | **0.025** |
+| p walk-forward | 0.248 | **0.030** |
+| Verdict | NO EDGE | **LOOKS REAL (4/4)** |
+
+Caveat that must travel with this result: the 4h timeframe was the
+*second* one tried for this signal. Trying configurations until one
+passes is itself a form of overfitting — with two attempts, the honest
+reading of p ≈ 0.03 is closer to p ≈ 0.06. And the fold results are
+lumpy: several folds had 0–3 trades. So: the strongest evidence produced
+in this project, worth pursuing — not yet worth funding. The right next
+tests, on data this pipeline has never touched: the same signal on
+another asset (e.g. ETH), and paper trading forward.
+
 ## What the numbers say
 
 **Nothing here is tradeable as-is.** No strategy passed all four checks.
