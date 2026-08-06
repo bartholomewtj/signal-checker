@@ -41,6 +41,38 @@ with Diamond Hands), and the same untouched rules made 5.6x
 buy-and-hold on ETH. Fold-level detail in report_devma_12h.txt and
 report_devma_1d.txt.
 
+## Cross-asset extension (2026-08-07, `python assets_devma.py`)
+
+DEVMA with untouched default parameters on eight majors, daily and 12h:
+
+| Asset | Daily PF | Daily return vs buy&hold | 12h PF | 12h return vs buy&hold |
+|---|---|---|---|---|
+| BTC | 1.092 | +894% vs +1231% | 1.071 | +872% vs +1251% |
+| ETH | 1.070 | +849% vs +152% | 1.067 | +1473% vs +157% |
+| BNB | 1.034 | +188% vs +6904% | 1.009 | +42% vs +7154% |
+| XRP | 1.068 | +784% vs +17% | 1.065 | +1104% vs +13% |
+| ADA | 1.104 | +4650% vs −17% | 1.069 | +2402% vs −23% |
+| LTC | 0.889 | −99% vs −80% | 0.961 | −83% vs −80% |
+| DOGE | 1.082 | +1276% vs +1683% | 1.065 | +1295% vs +1683% |
+| SOL | 1.132 | +3617% vs +2103% | 1.060 | +948% vs +2283% |
+
+**14 of 16 combinations profitable** (only LTC failed, both timeframes),
+each with 140–300 trades. The most telling pattern: the strategy's
+biggest wins are on assets where buy-and-hold went nowhere — ADA
+(−17% market, +4650% strategy), XRP (+17% market, +784% strategy),
+ETH (+152% market, +849% strategy). That's the signature of genuine
+trend/volatility timing rather than disguised market exposure. The LTC
+failure fits the same logic in reverse: a long-biased trend strategy on
+an asset in near-permanent decline with no sustained upside expansions
+bleeds to death.
+
+Caveats: crypto majors are heavily correlated, so these are not eight
+independent confirmations — call it perhaps two or three. Alt drawdowns
+at full-equity sizing are unsurvivable in practice (−70% to −99%);
+any real deployment needs smaller sizing. And BNB/DOGE/SOL trailing
+their own moonshot buy-and-hold is expected: no risk-managed strategy
+keeps up with a 70x asset.
+
 ---
 
 # Robustness check: Diamond Hands on 4h
