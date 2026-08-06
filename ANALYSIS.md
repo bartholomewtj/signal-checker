@@ -77,6 +77,38 @@ the only strategy whose out-of-sample result made money (+41.7%, PF
 1.03), but with just 23 trades and shuffle tests that can't tell it from
 luck. Too selective to prove, too plausible to dismiss.
 
+## Added later: DEVMA (v6 script, tested 2026-08-07)
+
+The newer "DEVMA strat NR 18/03" combines the 3D HL-band breakout and
+structure breaks with a 2D trend-step and a volatility gate (enter only
+while smoothed volatility is rising; exit signals only honoured while it
+falls). Port notes: BitMEX BVOL7D replaced with locally computed 7-day
+realized volatility; position size capped at 100% equity (the original's
+1%-risk sizing could lever up unboundedly); only the volatility-filter
+parameters were optimized (band timeframes stayed 2D/3D as authored).
+
+Tested on both timeframes as requested — both passed all four checks:
+
+| | 12h | 1d |
+|---|---|---|
+| Full backtest | +872% (b&h +1251%) | +894% (b&h +1231%) |
+| Out-of-sample return | +208% | +240% |
+| Out-of-sample PF | 1.052 | 1.070 |
+| Out-of-sample trades | 204 | 158 |
+| p in-sample / walk-forward | 0.005 / 0.010 | 0.015 / 0.010 |
+| Max drawdown (full) | −66% | −53% |
+| Verdict | **LOOKS REAL (4/4)** | **LOOKS REAL (4/4)** |
+
+This is stronger evidence than the Diamond Hands 4h pass: an order of
+magnitude more out-of-sample trades, lower p-values, and two timeframes
+specified up front rather than found by searching. One honest worry from
+the fold tables: on both timeframes most of the out-of-sample profit
+came from 2019–2021; the 2023–2025 folds hover at or below breakeven
+(daily: 0.84, 0.93, 0.84, 0.97, 0.91 before the last fold's 1.13). The
+edge as measured is real but looks thinner in recent years. And the
+tested strategy is the port — realized-vol gate, capped sizing — not
+literally the leveraged BVOL original.
+
 ## Not tested, and why
 
 - **Volume heatmap** and **MTF close times** — display tools; they
