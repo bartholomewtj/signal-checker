@@ -13,11 +13,13 @@ Runs four stages and prints a plain-language verdict:
                           the strictest test in the pipeline.
 
 Usage:
-    python check.py            # full run (slow, ~30-60 min)
-    python check.py --quick    # fewer shuffles, ~5-10 min
+    python check.py --strategy diamond_hands
+    python check.py --strategy vwap_rejection --timeframe 1h --since 2021-01-01
+    python check.py --strategy trend_step --quick
 """
 
 import argparse
+import itertools
 import os
 import time
 
@@ -31,26 +33,26 @@ from backtesting.lib import FractionalBacktest
 
 # Without fractional units the broker would skip trades whenever equity
 # is below the price of one whole Bitcoin. Belt and braces: silence the
-# cancellation warning too, so a 10-minute run doesn't produce megabytes
-# of repeated text.
+# cancellation warning too, so a long run doesn't produce megabytes of
+# repeated text.
 warnings.filterwarnings(
     "ignore", message=".*insufficient margin.*", category=UserWarning)
 
 import data
 from permute import permute_bars
-from strategy import DiamondHands, PARAM_GRID, WARMUP
+from strategies import REGISTRY
 
 CASH = 100_000
 COMMISSION = 0.0015  # 0.15% per side
 SPREAD = 0.0005      # 0.05% slippage stand-in
 
 
-def run(df, lookback, trend_len):
+def run(df, strat, params):
     """One backtest. Returns (per-bar log returns of equity, stats)."""
-    bt = FractionalBacktest(df, DiamondHands, fractional_unit=1e-6,
+    bt = FractionalBacktest(df, strat, fractional_unit=1e-6,
                             cash=CASH, commission=COMMISSION,
                             spread=SPREAD, finalize_trades=True)
-    stats = bt.run(lookback=lookback, trend_len=trend_len)
+    stats = bt.run(**params)
     equity = stats["_equity_curve"]["Equity"]
     rets = np.log(equity).diff().fillna(0.0)
     return rets, stats
@@ -65,19 +67,24 @@ def profit_factor(rets):
     return gains / losses
 
 
-def optimize(df):
+def grid_combos(strat):
+    keys = list(strat.GRID)
+    for values in itertools.product(*strat.GRID.values()):
+        yield dict(zip(keys, values))
+
+
+def optimize(df, strat):
     """Try every parameter combo, return (best_params, best_pf)."""
     best_pf, best_params = -np.inf, None
-    for lb in PARAM_GRID["lookback"]:
-        for tl in PARAM_GRID["trend_len"]:
-            rets, _ = run(df, lb, tl)
-            pf = profit_factor(rets)
-            if pf > best_pf:
-                best_pf, best_params = pf, (lb, tl)
+    for params in grid_combos(strat):
+        rets, _ = run(df, strat, params)
+        pf = profit_factor(rets)
+        if pf > best_pf:
+            best_pf, best_params = pf, params
     return best_params, best_pf
 
 
-def walkforward(df, train_bars, test_bars):
+def walkforward(df, strat, train_bars, test_bars):
     """Optimize on a rolling window, trade the next chunk, stitch results.
 
     Returns (stitched out-of-sample returns, number of OOS trades, folds).
@@ -91,8 +98,8 @@ def walkforward(df, train_bars, test_bars):
     while start + train_bars + test_bars <= len(df):
         train_end = start + train_bars           # test starts here
         test_end = train_end + test_bars
-        (lb, tl), _ = optimize(df.iloc[start:train_end])
-        rets, stats = run(df.iloc[start:test_end], lb, tl)
+        params, _ = optimize(df.iloc[start:train_end], strat)
+        rets, stats = run(df.iloc[start:test_end], strat, params)
         fold_rets = rets.iloc[train_bars:]       # test segment only
         oos_rets.append(fold_rets)
         test_start_time = df.index[train_end]
@@ -101,7 +108,7 @@ def walkforward(df, train_bars, test_bars):
         oos_trades += n_trades
         folds.append({
             "test_start": str(test_start_time.date()),
-            "params": (lb, tl),
+            "params": params,
             "pf": profit_factor(fold_rets),
             "trades": n_trades,
         })
@@ -115,21 +122,22 @@ def pvalue(real_score, perm_scores):
     return (1 + (perm_scores >= real_score).sum()) / (1 + len(perm_scores))
 
 
-def mcpt_insample(df, real_pf, n_perms):
+def mcpt_insample(df, strat, real_pf, n_perms):
     """Shuffle the data, re-optimize each time, collect best scores."""
     scores = []
     t0 = time.time()
     for i in range(n_perms):
-        perm = permute_bars(df, start_index=WARMUP, rng=np.random.default_rng(i))
-        _, pf = optimize(perm)
+        perm = permute_bars(df, start_index=strat.WARMUP,
+                            rng=np.random.default_rng(i))
+        _, pf = optimize(perm, strat)
         scores.append(pf)
         if (i + 1) % 10 == 0:
             print(f"  in-sample shuffle {i+1}/{n_perms} "
-                  f"({time.time()-t0:.0f}s elapsed)")
+                  f"({time.time()-t0:.0f}s elapsed)", flush=True)
     return pvalue(real_pf, scores), scores
 
 
-def mcpt_walkforward(df, train_bars, test_bars, real_pf, n_perms):
+def mcpt_walkforward(df, strat, train_bars, test_bars, real_pf, n_perms):
     """Shuffle everything after the first training window, re-run the
     whole walk-forward each time, collect scores."""
     scores = []
@@ -137,16 +145,20 @@ def mcpt_walkforward(df, train_bars, test_bars, real_pf, n_perms):
     for i in range(n_perms):
         perm = permute_bars(df, start_index=train_bars,
                             rng=np.random.default_rng(10_000 + i))
-        rets, _, _ = walkforward(perm, train_bars, test_bars)
+        rets, _, _ = walkforward(perm, strat, train_bars, test_bars)
         scores.append(profit_factor(rets))
         if (i + 1) % 5 == 0:
             print(f"  walk-forward shuffle {i+1}/{n_perms} "
-                  f"({time.time()-t0:.0f}s elapsed)")
+                  f"({time.time()-t0:.0f}s elapsed)", flush=True)
     return pvalue(real_pf, scores), scores
 
 
 def main():
     ap = argparse.ArgumentParser(description="Honest signal check")
+    ap.add_argument("--strategy", default="diamond_hands",
+                    choices=sorted(REGISTRY))
+    ap.add_argument("--timeframe", default="12h")
+    ap.add_argument("--since", default="2017-09-01")
     ap.add_argument("--quick", action="store_true", help="fewer shuffles")
     ap.add_argument("--insample-perms", type=int, default=None)
     ap.add_argument("--wf-perms", type=int, default=None)
@@ -156,21 +168,27 @@ def main():
                     help="bars traded after each training window")
     args = ap.parse_args()
 
+    strat = REGISTRY[args.strategy]
     n_is = args.insample_perms or (30 if args.quick else 200)
     n_wf = args.wf_perms or (10 if args.quick else 100)
 
-    df = data.load()
-    print(f"Data: {len(df)} bars, {df.index[0].date()} to {df.index[-1].date()}\n")
+    df = data.load(timeframe=args.timeframe, since=args.since)
+    print(f"Strategy: {args.strategy}   Data: {len(df)} bars "
+          f"({args.timeframe}), {df.index[0].date()} to {df.index[-1].date()}\n",
+          flush=True)
 
-    lines = []
+    lines = [f"Strategy: {args.strategy}",
+             f"Data: {len(df)} {args.timeframe} bars, "
+             f"{df.index[0].date()} to {df.index[-1].date()}", ""]
     def say(msg=""):
-        print(msg)
+        print(msg, flush=True)
         lines.append(msg)
 
     # ---- Stage 1: full backtest with default parameters ----
     say("=" * 62)
     say("STAGE 1 - Full backtest (default parameters)")
-    rets, stats = run(df, DiamondHands.lookback, DiamondHands.trend_len)
+    defaults = {k: getattr(strat, k) for k in strat.GRID}
+    rets, stats = run(df, strat, defaults)
     say(f"  Return: {stats['Return [%]']:.1f}%   "
         f"Buy&hold: {stats['Buy & Hold Return [%]']:.1f}%")
     say(f"  Profit factor: {profit_factor(rets):.3f}   "
@@ -182,10 +200,9 @@ def main():
     say()
     say("=" * 62)
     say(f"STAGE 2 - In-sample honesty test ({n_is} shuffles)")
-    (lb, tl), real_is_pf = optimize(df)
-    say(f"  Best in-sample params: lookback={lb}, trend_len={tl}, "
-        f"profit factor {real_is_pf:.3f}")
-    p_is, _ = mcpt_insample(df, real_is_pf, n_is)
+    best, real_is_pf = optimize(df, strat)
+    say(f"  Best in-sample params: {best}, profit factor {real_is_pf:.3f}")
+    p_is, _ = mcpt_insample(df, strat, real_is_pf, n_is)
     say(f"  p-value: {p_is:.3f}  "
         f"(chance that shuffled noise scores this well)")
 
@@ -194,7 +211,8 @@ def main():
     say("=" * 62)
     say(f"STAGE 3 - Walk-forward ({args.train_bars} train bars, "
         f"{args.test_bars} test bars per fold)")
-    wf_rets, wf_trades, folds = walkforward(df, args.train_bars, args.test_bars)
+    wf_rets, wf_trades, folds = walkforward(df, strat,
+                                            args.train_bars, args.test_bars)
     wf_pf = profit_factor(wf_rets)
     wf_total = float(np.exp(wf_rets.sum()) - 1) * 100
     for f in folds:
@@ -207,7 +225,8 @@ def main():
     say()
     say("=" * 62)
     say(f"STAGE 4 - Walk-forward honesty test ({n_wf} shuffles, slow)")
-    p_wf, _ = mcpt_walkforward(df, args.train_bars, args.test_bars, wf_pf, n_wf)
+    p_wf, _ = mcpt_walkforward(df, strat, args.train_bars, args.test_bars,
+                               wf_pf, n_wf)
     say(f"  p-value: {p_wf:.3f}")
 
     # ---- Verdict ----
@@ -233,9 +252,11 @@ def main():
     else:
         say("  NO EDGE FOUND. The backtest result is consistent with luck.")
 
-    with open("report.txt", "w") as fh:
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       f"report_{args.strategy}.txt")
+    with open(out, "w") as fh:
         fh.write("\n".join(lines) + "\n")
-    print("\nSaved to report.txt")
+    print(f"\nSaved to {out}")
 
 
 if __name__ == "__main__":
