@@ -53,6 +53,19 @@ run), while the longer trend agrees. Swap in your own signal by editing
 that file — anything that can be expressed as buy/sell rules on
 open/high/low/close works.
 
+## Dashboard
+
+```
+python dashboard.py
+```
+
+Opens a live dashboard at http://localhost:8787: pick any strategy,
+asset and timeframe; see the price chart with every trade marked, the
+equity curve, headline stats, what position the strategy holds right
+now, and the honesty-test verdicts. "Update data" pulls just the newest
+candles from the exchange; the auto-refresh checkbox re-runs every
+minute.
+
 ## Files
 
 - `data.py` — downloads and caches price candles (Binance via ccxt)

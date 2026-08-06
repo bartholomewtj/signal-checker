@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>signal-check dashboard</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    --bg: #12161c; --panel: #1a2028; --border: #2a323d;
+    --ink: #e6e9ee; --ink2: #9aa4b2; --ink3: #6b7684;
+    --up: #26a69a; --down: #ef5350; --accent: #5b8dd9;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink);
+         font: 14px/1.45 system-ui, "Segoe UI", sans-serif; padding: 16px; }
+  h1 { font-size: 17px; font-weight: 600; margin-bottom: 12px; }
+  h1 span { color: var(--ink3); font-weight: 400; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+         margin-bottom: 14px; }
+  select, button { background: var(--panel); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
+    font: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent);
+                   color: #fff; }
+  button:disabled { opacity: .5; cursor: wait; }
+  label.chk { color: var(--ink2); display: flex; gap: 5px; align-items: center; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+           gap: 8px; margin-bottom: 14px; }
+  .tile { background: var(--panel); border: 1px solid var(--border);
+          border-radius: 8px; padding: 10px 12px; }
+  .tile .k { color: var(--ink2); font-size: 12px; }
+  .tile .v { font-size: 20px; font-weight: 600; margin-top: 2px;
+             font-variant-numeric: tabular-nums; }
+  .tile .v.pos { color: var(--up); } .tile .v.neg { color: var(--down); }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px;
+           font-size: 12px; font-weight: 600; }
+  .badge.LONG { background: #14342f; color: var(--up); }
+  .badge.SHORT { background: #3a2224; color: var(--down); }
+  .badge.FLAT { background: #262d36; color: var(--ink2); }
+  .badge.real { background: #14342f; color: var(--up); }
+  .badge.maybe { background: #3a3320; color: #d9b45b; }
+  .badge.none { background: #3a2224; color: var(--down); }
+  .panel { background: var(--panel); border: 1px solid var(--border);
+           border-radius: 8px; padding: 10px; margin-bottom: 14px; }
+  .panel h2 { font-size: 13px; color: var(--ink2); font-weight: 600;
+              margin: 2px 4px 8px; }
+  #price { height: 380px; } #equity { height: 160px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: right; padding: 5px 8px;
+           border-top: 1px solid var(--border);
+           font-variant-numeric: tabular-nums; }
+  th { color: var(--ink3); font-weight: 500; border-top: none; }
+  th:first-child, td:first-child { text-align: left; }
+  td.pos { color: var(--up); } td.neg { color: var(--down); }
+  .verdicts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .verdicts .v-item { background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 8px; font-size: 12px; color: var(--ink2); }
+  #status { color: var(--ink3); font-size: 12px; margin-left: auto; }
+  .err { color: var(--down); }
+</style>
+</head>
+<body>
+<h1>signal-check <span>· live strategy dashboard</span></h1>
+
+<div class="bar">
+  <select id="strategy"></select>
+  <select id="symbol"></select>
+  <select id="timeframe"></select>
+  <button class="primary" id="run">Run</button>
+  <button id="fresh">Update data</button>
+  <label class="chk"><input type="checkbox" id="auto"> auto-refresh 60s</label>
+  <span id="status"></span>
+</div>
+
+<div class="tiles" id="tiles"></div>
+
+<div class="panel"><h2>Price &amp; trades (▲ long entry, ▼ short entry, ● exit)</h2>
+  <div id="price"></div></div>
+<div class="panel"><h2>Equity curve ($100k start)</h2><div id="equity"></div></div>
+
+<div class="panel"><h2>Recent trades</h2>
+  <table id="trades"><thead><tr>
+    <th>Side</th><th>Entry time</th><th>Entry</th><th>Exit</th><th>Return</th>
+  </tr></thead><tbody></tbody></table></div>
+
+<div class="panel"><h2>Honesty-test verdicts (from saved reports, BTC)</h2>
+  <div class="verdicts" id="verdicts"></div></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (x, d=1) => x == null ? "–" : x.toLocaleString(undefined,
+  {maximumFractionDigits: d, minimumFractionDigits: 0});
+
+const chartOpts = {
+  layout: {background: {color: "#1a2028"}, textColor: "#9aa4b2"},
+  grid: {vertLines: {color: "#232a33"}, horzLines: {color: "#232a33"}},
+  rightPriceScale: {borderColor: "#2a323d"},
+  timeScale: {borderColor: "#2a323d"},
+  crosshair: {mode: 0},
+};
+const priceChart = LightweightCharts.createChart($("price"), chartOpts);
+const candleSeries = priceChart.addCandlestickSeries({
+  upColor: "#26a69a", downColor: "#ef5350",
+  wickUpColor: "#26a69a", wickDownColor: "#ef5350", borderVisible: false});
+const equityChart = LightweightCharts.createChart($("equity"), chartOpts);
+const equitySeries = equityChart.addAreaSeries({
+  lineColor: "#5b8dd9", topColor: "rgba(91,141,217,.25)",
+  bottomColor: "rgba(91,141,217,0)", lineWidth: 2});
+new ResizeObserver(() => {
+  priceChart.applyOptions({width: $("price").clientWidth});
+  equityChart.applyOptions({width: $("equity").clientWidth});
+}).observe(document.body);
+
+async function loadMeta() {
+  const m = await (await fetch("/api/meta")).json();
+  const fill = (id, items, pick) => {
+    $(id).innerHTML = items.map(x =>
+      `<option ${x === pick ? "selected" : ""}>${x}</option>`).join("");
+  };
+  fill("strategy", m.strategies, "devma");
+  fill("symbol", m.symbols, "BTC/USDT");
+  fill("timeframe", m.timeframes, "1d");
+  $("verdicts").innerHTML = m.verdicts.map(v => {
+    const cls = v.verdict === "LOOKS REAL" ? "real"
+              : v.verdict === "NOT PROVEN" ? "maybe" : "none";
+    return `<span class="v-item">${v.strategy} ${v.timeframe}
+            <span class="badge ${cls}">${v.verdict}</span></span>`;
+  }).join("");
+}
+
+async function run(fresh) {
+  $("run").disabled = $("fresh").disabled = true;
+  $("status").textContent = fresh ? "fetching latest candles…" : "running backtest…";
+  try {
+    const q = new URLSearchParams({
+      strategy: $("strategy").value, symbol: $("symbol").value,
+      timeframe: $("timeframe").value, fresh: fresh ? "1" : "0"});
+    const r = await (await fetch("/api/run?" + q)).json();
+    if (r.error) throw new Error(r.error);
+
+    candleSeries.setData(r.candles);
+    candleSeries.setMarkers(r.markers);
+    equitySeries.setData(r.equity);
+    priceChart.timeScale().fitContent();
+    equityChart.timeScale().fitContent();
+
+    const s = r.stats;
+    const tile = (k, v, cls="") =>
+      `<div class="tile"><div class="k">${k}</div>
+       <div class="v ${cls}">${v}</div></div>`;
+    const sign = x => x == null ? "" : x >= 0 ? "pos" : "neg";
+    $("tiles").innerHTML =
+      tile("Position now", `<span class="badge ${r.position}">${r.position}</span>`) +
+      tile("Strategy return", fmt(s["Return %"], 0) + "%", sign(s["Return %"])) +
+      tile("Buy & hold", fmt(s["Buy & hold %"], 0) + "%", sign(s["Buy & hold %"])) +
+      tile("Profit factor", fmt(s["Profit factor"], 3),
+           s["Profit factor"] > 1 ? "pos" : "neg") +
+      tile("Max drawdown", fmt(s["Max drawdown %"], 0) + "%", "neg") +
+      tile("Trades", s["Trades"]) +
+      tile("Win rate", fmt(s["Win rate %"], 0) + "%");
+
+    $("trades").querySelector("tbody").innerHTML = r.trades.map(t => `
+      <tr><td>${t.side}</td><td>${t.entry_time}</td>
+      <td>${fmt(t.entry, 2)}</td><td>${t.exit == null ? "open" : fmt(t.exit, 2)}</td>
+      <td class="${t.ret_pct >= 0 ? "pos" : "neg"}">${fmt(t.ret_pct, 1)}%</td></tr>`
+    ).join("");
+    $("status").textContent = "last candle: " + r.last_candle;
+  } catch (e) {
+    $("status").innerHTML = `<span class="err">${e.message}</span>`;
+  }
+  $("run").disabled = $("fresh").disabled = false;
+}
+
+$("run").onclick = () => run(false);
+$("fresh").onclick = () => run(true);
+for (const id of ["strategy", "symbol", "timeframe"])
+  $(id).onchange = () => run(false);
+let timer = null;
+$("auto").onchange = e => {
+  clearInterval(timer);
+  if (e.target.checked) timer = setInterval(() => run(true), 60_000);
+};
+
+loadMeta().then(() => run(false));
+</script>
+</body>
+</html>

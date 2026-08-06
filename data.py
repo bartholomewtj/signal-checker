@@ -71,6 +71,17 @@ def load(symbol="BTC/USDT", timeframe="12h", since="2017-09-01", refresh=False):
     return df
 
 
+def update(symbol="BTC/USDT", timeframe="12h", since="2017-09-01"):
+    """Bring a cached dataset up to now by fetching only the new candles."""
+    df = load(symbol, timeframe, since)
+    fresh = fetch_ohlcv(symbol, timeframe, since=df.index[-1].isoformat())
+    out = pd.concat([df, fresh])
+    out = out[~out.index.duplicated(keep="last")].sort_index()
+    safe = symbol.replace("/", "-")
+    out.to_csv(os.path.join(DATA_DIR, f"{safe}_{timeframe}.csv"))
+    return out
+
+
 def load_yahoo(symbol, since="2018-01-01", refresh=False):
     """Load daily candles for stocks/ETFs from Yahoo Finance's public
     chart API (free, no key, no extra library)."""
