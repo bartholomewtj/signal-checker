@@ -1,0 +1,82 @@
+# Robustness check: Diamond Hands on 4h
+
+The 4h result passed the four-stage honesty check (see ANALYSIS.md). A
+passing strategy can still be fragile, so this battery attacks it from
+seven angles. Reproduce everything with `python robustness.py`.
+Data: BTC 4h 2018–2026 unless stated; defaults lookback=20, trend_len=200;
+0.15% commission + 0.05% spread unless varied.
+
+## Results at a glance
+
+| # | Test | Result | Read |
+|---|---|---|---|
+| 1 | Parameter sweep (54 combos) | 35/54 profitable, median PF 1.037 | Plateau, not a spike — PASS |
+| 2 | Cost stress | PF 1.061 → 1.037 as fees rise 0.02% → 0.40% | Survives 2.5x realistic fees — PASS |
+| 3 | Long vs short leg | Long PF 1.08 (+376%); short PF 1.02 (+39%) | Long leg carries it — CAUTION |
+| 4 | Entry delayed one bar | PF 1.053 → 1.050, return 563% → 489% | Degrades gracefully — PASS |
+| 5 | Sub-periods (3-year thirds) | PF 1.084 / 1.011 / 1.066, all positive | No dead regime — PASS |
+| 6 | Bootstrap (10,000 resamples) | Median +529%; 4.7% chance of loss | Skewed favourably — PASS |
+| 7 | ETH, same rules, no re-tuning | PF 1.051, +766% vs +106% buy-and-hold | Transfers — PASS |
+
+## What each test showed
+
+**1. Parameter plateau.** Profitability is spread across a broad region
+(lookback 8–48 × trend 150–400 is almost uniformly PF > 1), and the
+defaults sit inside the plateau rather than on the best cell. The
+failure zones make sense: a 50-bar trend filter whipsaws, and lookback
+64 waits too long for sweeps. One warning from the map: the optimizer's
+favourite corner (lookback 48, trend 100, PF 1.142) sits next to a
+cliff (lookback 64, trend 100 = PF 0.590). Trade the plateau, not the
+optimum.
+
+**2. Costs barely matter.** With only 111 trades in 8.6 years, turnover
+is so low that even 0.40% per side (nearly 3x a normal taker fee) leaves
+PF at 1.037 and +282%. This edge is not an artifact of the cost model.
+
+**3. The short leg is a passenger.** Longs delivered +376% (PF 1.08);
+shorts +39% (PF 1.02). Shorts didn't lose — surviving short exposure
+through two crypto bull runs is itself notable — but nearly all the
+edge is the long side. A long-only version is simpler and loses little.
+
+**4. Not a timing fluke.** Entering a full bar late (8 hours after the
+signal on 4h bars) keeps PF essentially unchanged. Strategies that
+depend on razor-sharp fills die in this test; this one doesn't.
+
+**5. No dead regime.** 2018–20: +186% (PF 1.08). 2021–23: +15%
+(PF 1.01). 2024–26: +86% (PF 1.07). The middle third — chop and the
+2022 bear — was breakeven-ish, matching buy-and-hold's +16% with far
+less drawdown. It has flat stretches, not fatal ones.
+
+**6. Luck envelope.** Reshuffling which trades you happened to get,
+10,000 times: median outcome +529%, 5th percentile +3%, chance of
+overall loss 4.7%. The right tail is huge (95th pct +5,111%) — a few
+big winners drive results, consistent with the 33% win rate. Expect
+long losing streaks on the way to the average.
+
+**7. The strongest evidence: ETH.** Same rules, same defaults, zero
+re-tuning, on an asset the pipeline never saw during development:
+PF 1.051, +766% against ETH's +106% buy-and-hold, from 101 trades.
+Cross-asset transfer without adjustment is hard to fake. Max drawdown
+was −66%, though — ETH is wilder.
+
+## Weak points, honestly
+
+- **Drawdowns are serious**: −37% (BTC), −66% (ETH). At 100% equity per
+  trade this is not a comfortable ride; smaller position sizing scales
+  the pain and the profit together.
+- **The edge is long-biased** and concentrated in a few large winners;
+  the bootstrap's 5th percentile is roughly breakeven. Eight years can
+  still be one long lucky draw at ~5% probability.
+- **Multiple-testing residue remains** from ANALYSIS.md: 4h was the
+  second timeframe tried. The ETH transfer mitigates this materially
+  but doesn't erase it.
+
+## Bottom line
+
+The 4h Diamond Hands result is robust by every test available offline:
+plateau not spike, cost-insensitive, timing-insensitive, no dead regime,
+and it transfers to an untouched asset. The remaining unknowns (regime
+change, live execution) can only be answered by paper trading it
+forward. If pursued: use plateau parameters (lookback ~20–40, trend
+150–300), expect the long side to do the work, and size positions for
+a −40% drawdown you will eventually meet.
