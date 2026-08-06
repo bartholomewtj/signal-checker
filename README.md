@@ -16,8 +16,9 @@ python check.py     # full check, roughly 10 minutes
 python check.py --quick   # rough answer in about a minute
 ```
 
-The result prints to the screen and is saved to `report.txt`. It ends with a
-verdict: **LOOKS REAL**, **NOT PROVEN**, or **NO EDGE FOUND**.
+The result prints to the screen and is saved to
+`report_<strategy>_<timeframe>.txt`. It ends with a verdict: **LOOKS REAL**,
+**NOT PROVEN**, or **NO EDGE FOUND**.
 
 ## What it actually does
 
@@ -47,11 +48,15 @@ and both shuffle tests showing the real data beats noise (p < 0.05).
 
 ## The signal under test
 
-`strategy.py` holds a "sweep reversal" ported from an old TradingView Pine
-Script: price dips below the recent low but closes back above it (a stop
-run), while the longer trend agrees. Swap in your own signal by editing
-that file — anything that can be expressed as buy/sell rules on
-open/high/low/close works.
+`strategies.py` holds 8 strategies, each with its own parameter grid. One is
+"sweep reversal" (`DiamondHands`), a stop-run pattern ported from an old
+TradingView Pine Script: price dips below the recent low but closes back
+above it, while the longer trend agrees. The other seven are variations on
+trend-following and breakout ideas.
+
+All 8 were run through the pipeline above, across multiple assets and
+timeframes. See `ANALYSIS.md` for the per-strategy results and `ROBUSTNESS.md`
+for how they hold up out of sample and on other markets.
 
 ## Dashboard
 
@@ -69,9 +74,14 @@ minute.
 ## Files
 
 - `data.py` — downloads and caches price candles (Binance via ccxt)
-- `strategy.py` — the signal being tested, plus its parameter grid
+- `strategies.py` — the 8 strategies being tested, each with its parameter grid
 - `permute.py` — builds the shuffled price series for the honesty tests
-- `check.py` — runs the four stages and prints the verdict
+- `check.py` — runs the four stages and prints the verdict, saving
+  `report_<strategy>_<timeframe>.txt`
+- `robustness.py` / `robustness_devma.py` — re-run the pipeline across
+  multiple assets and timeframes to check a strategy isn't a one-market fluke
+- `assets_devma.py` / `equities_devma.py` — extend that robustness check to
+  more crypto assets and to equities/gold
 
 ## Credit where due
 
@@ -82,8 +92,9 @@ minute.
 
 ## Honest limitations
 
-- One asset (Bitcoin), one bar size (12h). A real edge should survive on
-  more than one.
+- Tested across 8 crypto majors, four timeframes (1h/4h/12h/1d), and a
+  handful of equities and gold — but that's still a small slice of markets a
+  real edge would need to survive.
 - Slippage is a flat estimate; live trading is messier.
 - Passing all four stages still isn't proof. Markets change. It just means
   the idea earned the right to be paper-traded.
