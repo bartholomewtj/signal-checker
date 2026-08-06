@@ -253,7 +253,7 @@ def main():
         say("  NO EDGE FOUND. The backtest result is consistent with luck.")
 
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       f"report_{args.strategy}.txt")
+                       f"report_{args.strategy}_{args.timeframe}.txt")
     with open(out, "w") as fh:
         fh.write("\n".join(lines) + "\n")
     print(f"\nSaved to {out}")

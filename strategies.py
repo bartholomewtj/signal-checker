@@ -330,6 +330,153 @@ class VWAPRejection(Strategy):
             self.position.close(); self.sell(); self.bars_held = 0
 
 
+# ---------------------------------------------------------------------------
+# 7. DEVMA - from the v6 "DEVMA strat NR 18/03" script
+
+def htf_bands(high, low, close, rule, n=1):
+    """Swing-anchored high/low bands computed on a higher timeframe and
+    mapped back to the chart with a one-full-bar delay (no lookahead),
+    matching the original script's no-repaint f_security wrapper.
+
+    Returns a DataFrame indexed like `close` with columns
+    upper, lower, mid, state (+1 mid rising / -1 mid falling).
+    """
+    ohlc = pd.DataFrame({"High": high, "Low": low, "Close": close})
+    htf = ohlc.resample(rule).agg({"High": "max", "Low": "min",
+                                   "Close": "last"}).dropna()
+    up = swing_high(htf.High, n)
+    down = swing_low(htf.Low, n)
+    upper = pd.Series(anchored_sma(htf.High.to_numpy(), up.to_numpy(), n),
+                      index=htf.index)
+    lower = pd.Series(anchored_sma(htf.Low.to_numpy(), down.to_numpy(), n),
+                      index=htf.index)
+    mid = (upper + lower) / 2
+    state = pd.Series(sticky_state(mid), index=htf.index)
+    out = pd.DataFrame({"upper": upper, "lower": lower,
+                        "mid": mid, "state": state}).shift(1)
+    return out.reindex(close.index, method="ffill")
+
+
+def structure_break_signals(o, h, l, c, n=1, m=6, lookback=48):
+    """Bull/bear structure breaks as in the original scripts: a single bar
+    engulfing one of the last `m` swing highs/lows, or the highest/lowest
+    swing of the last `lookback` bars."""
+    up = swing_high(h, n).to_numpy()
+    down = swing_low(l, n).to_numpy()
+    hn, ln, cn, on = h.to_numpy(), l.to_numpy(), c.to_numpy(), o.to_numpy()
+    h1 = np.concatenate([[np.nan], hn[:-1]])
+    l1 = np.concatenate([[np.nan], ln[:-1]])
+    bull = np.zeros(len(cn), dtype=bool)
+    bear = np.zeros(len(cn), dtype=bool)
+    hi_levels = last_swing_levels(hn, up, m)
+    lo_levels = last_swing_levels(ln, down, m)
+    run_max = np.full(len(cn), -np.inf)
+    for lvl in hi_levels:
+        run_max = np.fmax(run_max, lvl)
+        bull |= (on < run_max) & (cn > run_max) & (cn > h1)
+    run_min = np.full(len(cn), np.inf)
+    for lvl in lo_levels:
+        run_min = np.fmin(run_min, lvl)
+        bear |= (on > run_min) & (cn < run_min) & (cn < l1)
+    # the "lowest/highest swing in `lookback` bars" variant
+    hi48 = pd.Series(hi_levels[0]).rolling(lookback, min_periods=1).max().to_numpy()
+    lo48 = pd.Series(lo_levels[0]).rolling(lookback, min_periods=1).min().to_numpy()
+    bull |= (on < hi48) & (cn > hi48) & (cn > h1)
+    bear |= (on > lo48) & (cn < lo48) & (cn < l1)
+    return bull, bear
+
+
+class Devma(Strategy):
+    """Port of "DEVMA strat NR 18/03" (Pine v6).
+
+    Long when either:
+      - a single bar closes out above the 3D upper band (band breakout,
+        not on a bearish structure-break bar), or
+      - a bullish structure break while the 2D trend-step midband sits
+        above the 3D upper band, with the volatility EMA rising.
+    Shorts are the mirror image. Exits (price or midband crossing back
+    into the bands, or a midband rejection against the trend state) only
+    fire while the volatility EMA is falling. Initial stop at the signal
+    bar's low/high.
+
+    Port notes: BitMEX BVOL7D replaced with realized 7-day volatility
+    of the traded asset (same quantity, computed locally); position size
+    capped at 100% equity (original could lever up unboundedly); the
+    plot-only HMA/DEVMA lines are omitted from logic, as in the source.
+    """
+    vol_ma = 20    # EMA length on the volatility series (original: 20)
+    vol_run = 5    # bars the EMA must rise/fall (original: 5)
+
+    GRID = {"vol_ma": [10, 20, 40], "vol_run": [3, 5, 8]}
+    WARMUP = 360
+
+    def init(self):
+        o, h, l, c = (self.data.Open.s, self.data.High.s,
+                      self.data.Low.s, self.data.Close.s)
+
+        b1 = htf_bands(h, l, c, "2D")   # trend step timeframe
+        b2 = htf_bands(h, l, c, "3D")   # HL band timeframe
+        bull, bear = structure_break_signals(o, h, l, c)
+
+        # Volatility filter (stand-in for BITMEX:BVOL7D)
+        bars_per_day = max(1, int(round(pd.Timedelta("1D") /
+                                        (c.index[1] - c.index[0]))))
+        rv = np.log(c / c.shift(1)).rolling(7 * bars_per_day).std()
+        vma = rv.ewm(span=self.vol_ma, adjust=False).mean()
+        d = vma.diff()
+        vol_rising = ((d > 0).rolling(self.vol_run).min() == 1)
+        vol_falling = ((d < 0).rolling(self.vol_run).min() == 1)
+
+        on, cn = o.to_numpy(), c.to_numpy()
+        up2, lo2 = b2.upper.to_numpy(), b2.lower.to_numpy()
+        mid1, st1 = b1.mid.to_numpy(), b1.state.to_numpy()
+        vr, vf = vol_rising.to_numpy(), vol_falling.to_numpy()
+
+        long_breakout = (on < up2) & (cn > up2) & (cn > lo2) & ~bear
+        long_trend = bull & (mid1 > up2) & vr
+        short_breakout = (on > lo2) & (cn < lo2) & (cn < up2) & ~bull
+        short_trend = bear & (mid1 < lo2) & vr
+
+        def cross_under(a, b):
+            a1 = np.concatenate([[np.nan], a[:-1]])
+            b1_ = np.concatenate([[np.nan], b[:-1]])
+            return (a1 >= b1_) & (a < b)
+
+        def cross_over(a, b):
+            a1 = np.concatenate([[np.nan], a[:-1]])
+            b1_ = np.concatenate([[np.nan], b[:-1]])
+            return (a1 <= b1_) & (a > b)
+
+        hn, ln = h.to_numpy(), l.to_numpy()
+        bear_rej_mid = (on < mid1) & (hn > mid1) & (cn < mid1)
+        bull_rej_mid = (on > mid1) & (ln < mid1) & (cn > mid1)
+        bear_cross = cross_under(cn, up2) | cross_under(cn, lo2)
+        bull_cross = cross_over(cn, lo2) | cross_over(cn, up2)
+        ma_bear_cross = cross_under(mid1, up2) | cross_under(mid1, lo2)
+        ma_bull_cross = cross_over(mid1, lo2) | cross_over(mid1, up2)
+
+        long_close = (((st1 < 0) & bear_rej_mid) | ma_bear_cross | bear_cross) & vf
+        short_close = (((st1 > 0) & bull_rej_mid) | ma_bull_cross | bull_cross) & vf
+
+        f = lambda x: x.astype(float)
+        self.sig_long = self.I(lambda: f(long_breakout | long_trend), plot=False)
+        self.sig_short = self.I(lambda: f(short_breakout | short_trend), plot=False)
+        self.sig_long_close = self.I(lambda: f(long_close), plot=False)
+        self.sig_short_close = self.I(lambda: f(short_close), plot=False)
+
+    def next(self):
+        if self.sig_long[-1] > 0 and not self.position.is_long:
+            self.position.close()
+            self.buy(sl=self.data.Low[-1])
+        elif self.sig_short[-1] > 0 and not self.position.is_short:
+            self.position.close()
+            self.sell(sl=self.data.High[-1])
+        elif self.position.is_long and self.sig_long_close[-1] > 0:
+            self.position.close()
+        elif self.position.is_short and self.sig_short_close[-1] > 0:
+            self.position.close()
+
+
 REGISTRY = {
     "diamond_hands": DiamondHands,
     "trend_step": TrendStep,
@@ -337,4 +484,5 @@ REGISTRY = {
     "structure_break": StructureBreak,
     "open_rejection": OpenRejection,
     "vwap_rejection": VWAPRejection,
+    "devma": Devma,
 }
