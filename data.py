@@ -71,6 +71,36 @@ def load(symbol="BTC/USDT", timeframe="12h", since="2017-09-01", refresh=False):
     return df
 
 
+def load_yahoo(symbol, since="2018-01-01", refresh=False):
+    """Load daily candles for stocks/ETFs from Yahoo Finance's public
+    chart API (free, no key, no extra library)."""
+    import json
+    import urllib.request
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+    path = os.path.join(DATA_DIR, f"yahoo_{symbol}_1d.csv")
+    if os.path.exists(path) and not refresh:
+        return pd.read_csv(path, index_col="time", parse_dates=True)
+    p1 = int(pd.Timestamp(since).timestamp())
+    p2 = int(time.time())
+    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+           f"?interval=1d&period1={p1}&period2={p2}")
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        payload = json.load(resp)
+    result = payload["chart"]["result"][0]
+    quote = result["indicators"]["quote"][0]
+    df = pd.DataFrame({
+        "time": pd.to_datetime(result["timestamp"], unit="s").normalize(),
+        "Open": quote["open"], "High": quote["high"],
+        "Low": quote["low"], "Close": quote["close"],
+        "Volume": quote["volume"],
+    }).dropna().set_index("time").sort_index()
+    df.to_csv(path)
+    print(f"Saved {len(df)} candles to {path}")
+    return df
+
+
 if __name__ == "__main__":
     df = load()
     print(df.tail())

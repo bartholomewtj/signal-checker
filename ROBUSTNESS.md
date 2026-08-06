@@ -73,6 +73,49 @@ any real deployment needs smaller sizing. And BNB/DOGE/SOL trailing
 their own moonshot buy-and-hold is expected: no risk-managed strategy
 keeps up with a 70x asset.
 
+## Non-crypto markets (2026-08-07, `python equities_devma.py`)
+
+DEVMA with untouched defaults on daily bars, 2018–2026, US equities and
+gold (Yahoo Finance data). Two cost levels: the crypto assumption
+(0.15% + 0.05%) and a realistic equity level (0.03% + 0.01%).
+
+| Market | PF (crypto costs) | PF (equity costs) | Return (equity costs) | Buy & hold |
+|---|---|---|---|---|
+| SPY (S&P 500) | 0.898 | 0.988 | −6% | +186% |
+| QQQ (Nasdaq 100) | 0.963 | 1.036 | +26% | +351% |
+| IWM (Russell 2000) | 0.899 | 0.979 | −13% | +94% |
+| IJR (S&P 600 small cap) | 0.894 | 0.971 | −18% | +91% |
+| AAPL | 1.026 | 1.076 | +103% | +625% |
+| MSFT | 0.849 | 0.909 | −53% | +482% |
+| JPM | 0.796 | 0.854 | −66% | +230% |
+| XOM | 0.856 | 0.912 | −55% | +82% |
+| GLD (gold) | 0.893 | 1.001 | 0% | +211% |
+
+**It doesn't transfer.** 1/9 profitable at crypto costs, 3/9 at cheap
+equity costs, and every market massively underperformed buy-and-hold.
+Small caps were no better than large caps.
+
+Why this is informative rather than just disappointing:
+
+- **The edge is a crypto-regime edge, not a universal law.** Equities at
+  the daily horizon mean-revert and gap overnight; equity volatility
+  expands mostly in crashes, so "enter breakouts while volatility
+  rises" — the exact ingredient the ablation showed carries DEVMA's
+  edge — is the wrong bet there. Crypto (2018–2023) trended 24/7 with
+  volatility expanding in *both* directions. The strategy harvests that
+  specific behaviour.
+- **A backtest artifact would have "worked" everywhere.** Failing
+  coherently where the mechanism shouldn't apply is what a genuine,
+  regime-specific edge looks like.
+- **It sharpens the decay warning.** If crypto's microstructure keeps
+  maturing toward equity-like behaviour (more institutions, more
+  mean-reversion), the 2024–26 flattening seen in the sub-period test
+  is what that would look like from the inside. The equity result and
+  the decay result tell one consistent story.
+
+Practical conclusion: DEVMA is a crypto strategy, full stop. Do not
+port it to stock portfolios.
+
 ---
 
 # Robustness check: Diamond Hands on 4h
