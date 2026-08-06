@@ -1,0 +1,4 @@
+backtesting>=0.6.6
+ccxt
+pandas
+numpy
