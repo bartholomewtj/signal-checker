@@ -495,6 +495,44 @@ class Devma(Strategy):
             self.position.close()
 
 
+# ---------------------------------------------------------------------------
+# 8. Combo - DEVMA chassis plus the Diamond Hands sweep as a second entry
+
+class Combo(Devma):
+    """DEVMA unchanged, with one addition: a sweep-reversal entry
+    (Diamond Hands' trigger) taken in the direction of DEVMA's 2D
+    trend-step. Breakout entries buy strength; sweep entries buy the
+    pullback within the same regime. Exits and stops are DEVMA's.
+    """
+    lookback = 20   # sweep lookback (from Diamond Hands)
+
+    GRID = {"vol_ma": [10, 20, 40], "vol_run": [3, 5, 8],
+            "lookback": [20, 48]}
+
+    def init(self):
+        super().init()
+        c, l, h = self.data.Close.s, self.data.Low.s, self.data.High.s
+        lb = self.lookback
+        prior_low_min = l.rolling(lb).min().shift(1)
+        prior_close_min = c.rolling(lb).min().shift(1)
+        prior_high_max = h.rolling(lb).max().shift(1)
+        prior_close_max = c.rolling(lb).max().shift(1)
+        sweep_long = ((l < prior_low_min) & (c > prior_close_min)).to_numpy()
+        sweep_short = ((h > prior_high_max) & (c < prior_close_max)).to_numpy()
+
+        # Recompute the trend-step state to gate sweeps by regime
+        b1 = htf_bands(h, l, c, self.band1)
+        st1 = b1.state.to_numpy()
+
+        base_long = self.sig_long.s.to_numpy()
+        base_short = self.sig_short.s.to_numpy()
+        long_all = (base_long > 0) | (sweep_long & (st1 > 0))
+        short_all = (base_short > 0) | (sweep_short & (st1 < 0))
+        f = lambda x: x.astype(float)
+        self.sig_long = self.I(lambda: f(long_all), plot=False)
+        self.sig_short = self.I(lambda: f(short_all), plot=False)
+
+
 REGISTRY = {
     "diamond_hands": DiamondHands,
     "trend_step": TrendStep,
@@ -503,4 +541,5 @@ REGISTRY = {
     "open_rejection": OpenRejection,
     "vwap_rejection": VWAPRejection,
     "devma": Devma,
+    "combo": Combo,
 }

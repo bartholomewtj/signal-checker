@@ -109,6 +109,36 @@ edge as measured is real but looks thinner in recent years. And the
 tested strategy is the port — realized-vol gate, capped sizing — not
 literally the leveraged BVOL original.
 
+## Combining Diamond Hands and DEVMA (2026-08-07)
+
+Two ways to combine were tested (`combo` in strategies.py; blend
+numbers below reproducible from check.run outputs):
+
+**Merged into one book — makes things worse.** Adding the sweep entry
+to DEVMA (gated by DEVMA's own trend-step) diluted the parent on both
+timeframes: 12h PF 1.071 → 1.043, daily PF 1.092 → 1.056, returns
+falling from ~+880% to ~+300%. DEVMA's vol-gated entries are the
+edge; interleaving pullback entries takes positions the vol gate would
+have refused, and inherits their stop-outs. Negative result, kept in
+the repo (`--strategy combo`) as documentation.
+
+**Blended as a portfolio — makes things better.** Running each parent
+as designed (Diamond Hands on 4h, DEVMA on daily) with capital split
+50/50 and daily rebalancing:
+
+| | DH 4h | DEVMA 1d | 50/50 blend |
+|---|---|---|---|
+| Total return | +1095% | +894% | **+1224%** |
+| Max drawdown | −57% | −53% | **−45%** |
+| Profit factor | 1.143 | 1.092 | 1.126 |
+
+Daily return correlation between the two is 0.64 — related (both are
+long-biased crypto trend systems) but different enough that the blend
+returns more than either parent with a smaller drawdown, the classic
+diversification-plus-rebalancing effect. Caveat: 0.64 is still high;
+this is one style diversified two ways, not two independent edges, and
+both parents share the same fading-regime risk flagged elsewhere.
+
 ## Not tested, and why
 
 - **Volume heatmap** and **MTF close times** — display tools; they
