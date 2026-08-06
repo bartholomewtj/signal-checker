@@ -23,9 +23,18 @@ import time
 
 os.environ.setdefault("TQDM_DISABLE", "1")  # silence per-run progress bars
 
+import warnings
+
 import numpy as np
 import pandas as pd
-from backtesting import Backtest
+from backtesting.lib import FractionalBacktest
+
+# Without fractional units the broker would skip trades whenever equity
+# is below the price of one whole Bitcoin. Belt and braces: silence the
+# cancellation warning too, so a 10-minute run doesn't produce megabytes
+# of repeated text.
+warnings.filterwarnings(
+    "ignore", message=".*insufficient margin.*", category=UserWarning)
 
 import data
 from permute import permute_bars
@@ -38,8 +47,9 @@ SPREAD = 0.0005      # 0.05% slippage stand-in
 
 def run(df, lookback, trend_len):
     """One backtest. Returns (per-bar log returns of equity, stats)."""
-    bt = Backtest(df, DiamondHands, cash=CASH, commission=COMMISSION,
-                  spread=SPREAD, finalize_trades=True)
+    bt = FractionalBacktest(df, DiamondHands, fractional_unit=1e-6,
+                            cash=CASH, commission=COMMISSION,
+                            spread=SPREAD, finalize_trades=True)
     stats = bt.run(lookback=lookback, trend_len=trend_len)
     equity = stats["_equity_curve"]["Equity"]
     rets = np.log(equity).diff().fillna(0.0)
