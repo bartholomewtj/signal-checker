@@ -82,6 +82,17 @@ def update(symbol="BTC/USDT", timeframe="12h", since="2017-09-01"):
     return out
 
 
+def split_holdout(df, months=12):
+    """Split a price frame into (working set, hold-out).
+
+    The hold-out is the final `months` months of data. Nothing in the
+    optimisation, walk-forward or verdict stages may see it.
+    Returns (work, holdout). `holdout` may be empty if the data is short.
+    """
+    cutoff = df.index[-1] - pd.DateOffset(months=months)
+    return df[df.index <= cutoff], df[df.index > cutoff]
+
+
 def load_yahoo(symbol, since="2018-01-01", refresh=False):
     """Load daily candles for stocks/ETFs from Yahoo Finance's public
     chart API (free, no key, no extra library)."""

@@ -1,0 +1,9 @@
+timestamp,mode,strategy,timeframe,direction,train_bars,test_bars,p_insample,p_walkforward,wf_pf,wf_sharpe,wf_trades,verdict
+2026-08-07T11:57:56,full,diamond_hands,1d,both,1460,365,0.4194,0.4545,1.0066,0.0317,11,NO EDGE
+2026-08-07T11:58:11,full,trend_step,1d,both,1460,365,0.3548,0.4545,0.8739,-0.8938,249,NO EDGE
+2026-08-07T11:58:37,full,diamond_hands,1d,long,1460,365,0.6774,0.9091,0.8309,-0.6067,10,NO EDGE
+2026-08-07T11:58:43,holdout,diamond_hands,1d,both,1460,365,,,,,4,HOLDOUT
+2026-08-07T12:05:37,full,diamond_hands,1d,both,1460,365,0.4194,0.4545,1.0066,0.0317,11,NO EDGE
+2026-08-07T12:05:45,holdout,diamond_hands,1d,both,1460,365,,,,,4,HOLDOUT
+2026-08-07T12:08:05,full,trend_step,1d,both,1460,365,0.3548,0.4545,0.8739,-0.8938,249,NO EDGE
+2026-08-07T12:08:26,full,trend_step,1d,both,1460,365,0.3548,0.4545,0.8869,-0.7954,249,NO EDGE
