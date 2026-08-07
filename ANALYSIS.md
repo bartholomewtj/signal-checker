@@ -10,6 +10,13 @@ next bar open, no leverage. 12-hour strategies tested on Bitcoin
 
 ## Scoreboard
 
+*The DEVMA and Diamond Hands 4h "LOOKS REAL" verdicts below and in the
+"Added later: DEVMA" section were produced under looser rules — no
+hold-out split, per-bar profit factor instead of trade-level, no funding
+cost on shorts, no multiple-testing correction. They are superseded by
+"Reruns under the honest rules" further down. Read that section before
+trusting any LOOKS REAL on this page.*
+
 | Strategy | From indicator | Full backtest | Out-of-sample PF | OOS trades | p (in-sample) | p (walk-fwd) | Verdict |
 |---|---|---|---|---|---|---|---|
 | structure_break | Structure break + Alerts | +8.5% | 1.001 | 386 | **0.005** | 0.059 | NOT PROVEN (3/4) |
@@ -108,6 +115,105 @@ came from 2019–2021; the 2023–2025 folds hover at or below breakeven
 edge as measured is real but looks thinner in recent years. And the
 tested strategy is the port — realized-vol gate, capped sizing — not
 literally the leveraged BVOL original.
+
+**Both LOOKS REAL verdicts above were re-earned under stricter rules —
+see the next section.** Only one survives, and only partially.
+
+## Reruns under the honest rules (2026-08-07)
+
+Since the two DEVMA passes and the Diamond Hands 4h pass above were
+judged, the pipeline gained four things: a 12-month hold-out that no
+optimisation or walk-forward stage ever sees; trade-level profit factor
+(gross trade profit ÷ gross trade loss, with a 10-trade minimum floor per
+window) in place of per-bar equity profit factor as the selection score;
+a funding cost of 0.01% per 8 hours charged against every bar a short
+position is held, in every stage including the shuffle tests; and a
+Bonferroni-corrected significance bar that accounts for how many
+strategy/timeframe combinations have been tried in total, not just this
+one. None of the three old LOOKS REAL verdicts were judged under any of
+that. All three were re-run, using the same data windows and walk-forward
+settings as the original runs so the comparison is apples to apples, but
+with 400 in-sample and 250 walk-forward shuffles (up from 200/100) so the
+p-values have enough resolution to test against the corrected bar.
+
+**One of the three survived, and only provisionally. Two died.**
+
+| | DEVMA 12h | DEVMA 1d | Diamond Hands 4h |
+|---|---|---|---|
+| Old verdict | LOOKS REAL (4/4) | LOOKS REAL (4/4) | LOOKS REAL (4/4) |
+| New verdict | **LOOKS REAL (4/4), provisional** | NOT PROVEN (2/4) | NOT PROVEN (3/4) |
+| Direction mode | both | both | both |
+| Data used / reserved | 5,793 / 730 bars | 2,897 / 365 bars | 17,367 / 2,190 bars |
+| OOS return | +231.7% | +150.2% | +233.7% |
+| Buy & hold, same period | **+767.4%** | **+892.8%** | **+767.5%** |
+| OOS trade-level PF | 1.061 | 1.059 | 1.065 |
+| Sharpe (annualised) | 0.44 | 0.33 | 0.63 |
+| OOS trades | 169 | 132 | 44 |
+| p in-sample | 0.0399 | 0.0698 | 0.0075 |
+| p walk-forward | 0.0159 | 0.0598 | 0.0558 |
+| Clears raw 0.05? | in-sample yes, wf yes | no | in-sample yes, wf no |
+| Clears corrected 0.0100?* | **no** | no | no |
+| Hold-out result | +7.2% return, PF 1.208, Sharpe 0.23, 30 trades, buy&hold −44.9% | — (not earned) | — (not earned) |
+
+\* The corrected bar is `0.05 / 5 = 0.0100`, based on 5 distinct
+strategy/timeframe combinations recorded in `trials.csv` as of this
+session (up from 2 before these reruns). It tightens as more trials are
+recorded. Each individual `report_*.txt` file shows the bar as it stood
+the moment that run finished — 12h's report shows 0.0167, 1d's shows
+0.0125, 4h's shows 0.0100 — because the ledger grew while the three runs
+were in progress. Judge all three against the final 0.0100 shown in the
+table above, not against what their own report file says. In particular,
+the DEVMA 12h report's own "clears corrected: YES" line is stale — it
+was checked against 0.0167, and against the final 0.0100 its
+walk-forward p (0.0159) does not clear.
+
+**DEVMA 12h is the only survivor, and only at the raw 0.05 bar.** Its
+in-sample p (0.0399) and walk-forward p (0.0159) both clear 0.05, so it
+still earns LOOKS REAL — but neither clears the corrected 0.0100 bar, so
+that verdict is provisional, not proven. No combo in this rerun clears
+the corrected bar on both p-values.
+
+**DEVMA 1d died from the combination of everything at once.** Both
+p-values drifted past 0.05 (0.0698 and 0.0598) once shorts started
+paying funding, selection moved from per-bar to trade-level profit
+factor, and a year of data came off the end for the hold-out. No single
+cause stands out as dominant here — it is several small honest costs
+adding up, not one clear culprit.
+
+**Diamond Hands 4h died with an overfitting fingerprint, not a
+near-miss.** Its in-sample p (0.0075) is the single strongest number in
+this whole rerun — strong enough to clear even the corrected bar on its
+own. But its stage-2 selection found a trade-level profit factor of
+**3.005** in the training windows, and that collapsed to **1.065** out of
+sample, with the walk-forward p (0.0558) failing even the raw bar. A
+selection score of 3.0 falling to 1.07 the moment it meets unseen data is
+the classic sign the optimiser fit noise in-sample rather than finding a
+durable edge — not a strategy that "almost" passed. 44 out-of-sample
+trades spread across 11 folds (about 4 per fold) is thin evidence either
+way.
+
+**The buy-and-hold comparison is the most important number the old
+analysis never showed.** All three strategies made money out of sample in
+absolute terms, but every one of them made a third to a sixth of what
+simply holding Bitcoin made over the identical stitched period (DEVMA
+12h: +232% vs +767%; DEVMA 1d: +150% vs +893%; Diamond Hands 4h: +234%
+vs +767%). A strategy that turns a profit but does worse than doing
+nothing is not a strategy worth trading, no matter how clean its
+p-value looks. This is true even for DEVMA 12h, the one survivor.
+
+**The hold-out look, taken once, for DEVMA 12h only.** Running the
+walk-forward once more on the full working set (no shuffles) to pick the
+final fold's parameters (`{'vol_ma': 20, 'vol_run': 8}`) and testing them,
+untouched by any optimisation, on the reserved final 12 months
+(2025-08-07 to 2026-08-06): total return +7.2%, trade-level profit factor
+1.208, Sharpe 0.23, 30 trades — against a buy-and-hold of −44.9% over the
+same reserved window (Bitcoin fell over that stretch, so beating it here
+is a lower bar than the earlier walk-forward periods where it rallied).
+This is one look at one strategy. It is not a second confirmation and it
+must not be tuned against — the moment the strategy changes because of
+what this number says, it stops being a hold-out. DEVMA 1d and Diamond
+Hands 4h did not earn a hold-out look because they failed the raw-0.05
+rerun; none was taken for them.
 
 ## Combining Diamond Hands and DEVMA (2026-08-07)
 

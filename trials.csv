@@ -7,3 +7,7 @@ timestamp,mode,strategy,timeframe,direction,train_bars,test_bars,p_insample,p_wa
 2026-08-07T12:05:45,holdout,diamond_hands,1d,both,1460,365,,,,,4,HOLDOUT
 2026-08-07T12:08:05,full,trend_step,1d,both,1460,365,0.3548,0.4545,0.8739,-0.8938,249,NO EDGE
 2026-08-07T12:08:26,full,trend_step,1d,both,1460,365,0.3548,0.4545,0.8869,-0.7954,249,NO EDGE
+2026-08-07T12:36:29,full,devma,12h,both,1460,365,0.0399,0.0159,1.0609,0.4391,169,LOOKS REAL
+2026-08-07T12:48:58,full,devma,1d,both,730,182,0.0698,0.0598,1.0594,0.3278,132,NOT PROVEN
+2026-08-07T13:29:49,full,diamond_hands,4h,both,4380,1095,0.0075,0.0558,1.0647,0.6309,44,NOT PROVEN
+2026-08-07T13:32:34,holdout,devma,12h,both,1460,365,,,,,30,HOLDOUT
