@@ -90,9 +90,35 @@ def rejection(open_, high, low, close, level):
 
 
 # ---------------------------------------------------------------------------
+# Shared base: a `direction` filter usable by every strategy below.
+
+class Base(Strategy):
+    """Shared base for every strategy in this file.
+
+    `direction` filters which side may be opened:
+      both  - unchanged
+      long  - sell() is ignored, so a short signal just flattens the position
+      short - buy() is ignored
+    Strategies already call `self.position.close()` before opening the
+    opposite side, so ignoring the open is exactly the behaviour we want.
+    """
+    direction = "both"
+
+    def buy(self, **kwargs):
+        if self.direction == "short":
+            return None
+        return super().buy(**kwargs)
+
+    def sell(self, **kwargs):
+        if self.direction == "long":
+            return None
+        return super().sell(**kwargs)
+
+
+# ---------------------------------------------------------------------------
 # 1. Diamond Hands - sweep reversal (from "Diamond Hands strategy")
 
-class DiamondHands(Strategy):
+class DiamondHands(Base):
     """Price sweeps the recent low but closes back above it, trend agrees."""
     lookback = 20
     trend_len = 200
@@ -130,7 +156,7 @@ class DiamondHands(Strategy):
 # ---------------------------------------------------------------------------
 # 2. Trend Step - from "Trend Shifts + Alerts" / "Trend Classifier Strategy"
 
-class TrendStep(Strategy):
+class TrendStep(Base):
     """Long while the swing-anchored midband is rising, short while falling.
 
     The indicator's midband = average of (SMA of highs since the last
@@ -166,7 +192,7 @@ class TrendStep(Strategy):
 # ---------------------------------------------------------------------------
 # 3. HL Band Breakout - from "HL Bands + Alerts"
 
-class HLBandBreakout(Strategy):
+class HLBandBreakout(Base):
     """Long when price closes out above the upper band ("exit cloud - H"
     alert), close the long when it re-enters the cloud. Mirror for shorts
     below the lower band. Bands are the swing-anchored SMAs of highs/lows.
@@ -207,7 +233,7 @@ class HLBandBreakout(Strategy):
 # ---------------------------------------------------------------------------
 # 4. Structure Break - from "Structure break + Alerts"
 
-class StructureBreak(Strategy):
+class StructureBreak(Base):
     """Long when a single bar opens below and closes above a recent swing
     high (and above the prior bar's high) - the indicator's "Bullish SB"
     alert. Short on the mirror image. Stop-and-reverse: hold until the
@@ -254,7 +280,7 @@ class StructureBreak(Strategy):
 # ---------------------------------------------------------------------------
 # 5. Open Rejection - from "Killzones + Opens + Rejection alerts"
 
-class OpenRejection(Strategy):
+class OpenRejection(Base):
     """The indicator draws yesterday's daily close (its "daily open" line)
     and the weekly equivalent, and alerts when a bar dips through the
     level but closes back on its original side (a rejection).
@@ -294,7 +320,7 @@ class OpenRejection(Strategy):
 # ---------------------------------------------------------------------------
 # 6. VWAP Rejection - from "VWAP daily anchor"
 
-class VWAPRejection(Strategy):
+class VWAPRejection(Base):
     """The indicator anchors VWAP (volume-weighted average price) to each
     day and alerts on rejections of the VWAP line. Trade: long on a
     bullish rejection, short on bearish, exit after `hold` bars (exit is
@@ -386,7 +412,7 @@ def structure_break_signals(o, h, l, c, n=1, m=6, lookback=48):
     return bull, bear
 
 
-class Devma(Strategy):
+class Devma(Base):
     """Port of "DEVMA strat NR 18/03" (Pine v6).
 
     Long when either:
