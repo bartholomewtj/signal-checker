@@ -86,6 +86,15 @@ LABEL_CHARS = 80                # "Bash: <command>" shown as the event name
 # tend to use. `command`/`file_path`/`pattern` cover Bash/Edit/Grep respectively.
 PRIMARY_ARGS = ("command", "file_path", "path", "pattern", "query", "url", "prompt")
 
+# The tools a roster `tools:` list is allowed to grant or withhold. Anything an
+# agent does not name is passed as --disallowedTools, because that is the only
+# flag that RESTRICTS: allow rules "have no effect in bypassPermissions because
+# everything else is already approved" (permission-modes docs), while deny
+# rules apply in every mode. Without the deny list, pi's hard `--tools` filter
+# would arrive here as a no-op and every CC agent would run with everything.
+DENYABLE_TOOLS = {"Read", "Grep", "Glob", "Bash", "Edit", "Write",
+                  "NotebookEdit", "Task", "WebFetch", "WebSearch"}
+
 # `thinking` in the config is pi's vocabulary; Claude Code spends the same
 # dimension through --effort. low/medium/high exist in both, so only the ends
 # need naming, and the extra rungs are reachable by writing them in the config.
@@ -332,13 +341,22 @@ def run(request: PiRequest, on_event: Optional[Callable[[dict], None]] = None,
     # errors out, and --resume on a missing one starts from nothing, which
     # looks like an agent that forgot the plan it just wrote.
     cmd += (["--session-id", cc_session] if starting else ["--resume", cc_session])
-    # --allowedTools is variadic: it consumes every following argument until the
-    # next flag. A prompt appended after it is silently eaten as another tool
-    # name, and the CLI then dies claiming no prompt was given. Keep it last in
-    # argv and send the prompt through stdin, which the CLI documents as the
-    # equal alternative.
+    # --allowedTools/--disallowedTools are variadic: they consume every
+    # following argument until the next flag. A prompt appended after them is
+    # silently eaten as another tool name, and the CLI then dies claiming no
+    # prompt was given. Keep them last in argv and send the prompt through
+    # stdin, which the CLI documents as the equal alternative.
+    #
+    # Both flags are needed to reproduce pi's `--tools` semantics. The deny
+    # list is the enforcing half — under bypassPermissions an allow list
+    # approves nothing that was not already approved. The allow list still
+    # matters the moment the operator flips CC_PERMISSION_MODE to something
+    # stricter, so it is kept.
     if request.tools:
         cmd += ["--allowedTools", ",".join(request.tools)]
+        denied = sorted(DENYABLE_TOOLS - set(request.tools))
+        if denied:
+            cmd += ["--disallowedTools", ",".join(denied)]
 
     raw_path = Path(request.raw_output_path)
     raw_path.parent.mkdir(parents=True, exist_ok=True)

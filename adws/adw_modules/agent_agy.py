@@ -257,13 +257,15 @@ def run(request: PiRequest, on_event: Optional[Callable[[dict], None]] = None,
     agy_session = session_uuid(request.session_id)
     starting = _is_new_session(session_dir, request.session_id)
 
+    # agy has no --system-prompt flag, so the system prompt rides ahead of the
+    # task in the one prompt we can send. `system_prompt` arrives as rendered
+    # TEXT (agents.py renders the template before building the request), never
+    # as a path — treating it as a path here once dropped every agy agent's
+    # system prompt silently, because Path(<multi-line text>) raises OSError.
     full_prompt = request.prompt
     if request.system_prompt:
-        try:
-            sys_text = Path(request.system_prompt).read_text(encoding="utf-8")
-            full_prompt = f"System Instructions:\n{sys_text}\n\nTask:\n{request.prompt}"
-        except OSError:
-            pass
+        full_prompt = (f"System Instructions:\n{request.system_prompt}\n\n"
+                       f"Task:\n{request.prompt}")
 
     cmd = [
         AGY_PATH,
