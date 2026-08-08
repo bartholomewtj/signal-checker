@@ -93,7 +93,8 @@ PRIMARY_ARGS = ("command", "file_path", "path", "pattern", "query", "url", "prom
 # rules apply in every mode. Without the deny list, pi's hard `--tools` filter
 # would arrive here as a no-op and every CC agent would run with everything.
 DENYABLE_TOOLS = {"Read", "Grep", "Glob", "Bash", "Edit", "Write",
-                  "NotebookEdit", "Task", "WebFetch", "WebSearch"}
+                  "NotebookEdit", "Task", "WebFetch", "WebSearch",
+                  "SendMessage", "ListAgents"}
 
 # `thinking` in the config is pi's vocabulary; Claude Code spends the same
 # dimension through --effort. low/medium/high exist in both, so only the ends
