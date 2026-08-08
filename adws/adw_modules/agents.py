@@ -15,7 +15,7 @@ from typing import Optional
 
 import yaml
 
-from . import agent_cc, agent_pi, permissions, prompts
+from . import agent_agy, agent_cc, agent_pi, permissions, prompts
 from .data_types import (AgentCall, AgentConfig, EnvelopeBase, EventRecord,
                          GateCheck, GateReport, Phase, PiRequest, PiResult,
                          SSSFConfig, UsageBreakdown)
@@ -23,11 +23,15 @@ from .utils import new_id
 
 JSON_FIX_ATTEMPTS = 2      # continue-with-correction attempts for malformed JSON
 
-# Which module drives which coding agent. Both expose the same three names —
+# Which module drives which coding agent. All expose the same three names —
 # run(), resolve_model(), ToolCallTracker — so everything below this line is
-# written once and works either way. Adding a third coding agent is a row here
-# plus a module that honours those three, nothing else.
-INTERFACES = {"pi": agent_pi, "claude_code": agent_cc}
+# written once and works either way.
+INTERFACES = {
+    "pi": agent_pi,
+    "claude_code": agent_cc,
+    "agy": agent_agy,
+    "gemini": agent_agy,
+}
 
 
 def interface(agent: AgentConfig):

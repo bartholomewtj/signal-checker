@@ -1,9 +1,9 @@
 # sssf.config.yaml — the factory's agent roster. One agent, one prompt, one purpose.
 #
-# This is the claudeSSSF roster: every agent runs on the Claude Code CLI, which
-# authenticates with your Claude subscription rather than an API key. The `pi`
-# coding agent is still selectable per-agent if you have it set up — set
-# `coding_agent: pi` on that agent and give it a pi model pattern.
+# This is the claudeSSSF roster. Planner and builder run on the Claude Code CLI
+# (your Claude subscription); scout, reviewer and documenter run on the `agy`
+# coding agent (free Gemini Pro quota). The `pi` coding agent is also still
+# selectable per-agent — set `coding_agent: pi` and give it a pi model pattern.
 defaults:
   coding_agent: claude_code
   model: sonnet                    # alias (opus|sonnet|haiku|fable) or an explicit claude-* id
@@ -61,6 +61,7 @@ agents:
 
   - name: builder
     model: sonnet                  # the long pole in every run; Sonnet 5 is near-Opus on coding
+    thinking: high                 # extra effort on the phase that writes the code
     color: "#22d3ee"
     purpose: Implement the plan exactly; report every changed file in the envelope.
     prompt_engineering:
@@ -77,7 +78,8 @@ agents:
       - Write
 
   - name: scout
-    model: sonnet
+    coding_agent: agy
+    model: gemini-3.6-flash        # free Gemini quota — recon is low-stakes
     thinking: low                  # read-only recon needs breadth, not depth —
                                    # low effort is faster and cheaper here
     color: "#fbbf24"
@@ -99,8 +101,9 @@ agents:
   # phase over adw_modules/quality.py. See SKILL.md hard rule 8.
 
   - name: reviewer
-    model: opus                    # catching what the builder missed is worth the deeper model
-    thinking: high
+    coding_agent: agy
+    model: gemini-3.1-pro          # free Gemini quota, and a different model family than
+    thinking: high                 # the builder — cross-family review catches shared blind spots
     color: "#fb7185"
     purpose: Confirm that what was built is what was asked for; change nothing.
     prompt_engineering:
@@ -116,8 +119,9 @@ agents:
       - Write
 
   - name: documenter
-    model: haiku                   # writing up a diff is mechanical; bump to
-    thinking: low                  # sonnet if the docs read below your bar
+    coding_agent: agy
+    model: gemini-3.6-flash        # free Gemini quota — writing up a diff is mechanical
+    thinking: low
     color: "#e879f9"
     purpose: Write up the change that was just made, from the diff; document only.
     prompt_engineering:
