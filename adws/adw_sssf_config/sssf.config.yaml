@@ -1,9 +1,13 @@
 # sssf.config.yaml — the factory's agent roster. One agent, one prompt, one purpose.
 #
-# This is the claudeSSSF roster. Planner and builder run on the Claude Code CLI
-# (your Claude subscription); scout, reviewer and documenter run on the `agy`
-# coding agent (free Gemini Pro quota). The `pi` coding agent is also still
-# selectable per-agent — set `coding_agent: pi` and give it a pi model pattern.
+# This is the claudeSSSF roster. Every agent runs on the Claude Code CLI, so the
+# whole factory spends one subscription allowance. Models are picked per phase:
+# haiku for mechanical work, sonnet for the builder (the long pole), opus where
+# judgement decides the run. The `agy` coding agent (free Gemini quota) and `pi`
+# are still selectable per-agent — set `coding_agent:` and a matching model.
+#
+# Haiku 4.5 takes no effort level at the API layer and agent_cc.py always passes
+# --effort; if the CLI rejects it, put scout and documenter on `sonnet` + `low`.
 defaults:
   coding_agent: claude_code
   model: sonnet                    # alias (opus|sonnet|haiku|fable) or an explicit claude-* id
@@ -78,8 +82,7 @@ agents:
       - Write
 
   - name: scout
-    coding_agent: agy
-    model: gemini-3.6-flash        # free Gemini quota — recon is low-stakes
+    model: haiku                   # one-pass mechanical recon — cheapest tier that can do it
     thinking: low                  # read-only recon needs breadth, not depth —
                                    # low effort is faster and cheaper here
     color: "#fbbf24"
@@ -101,9 +104,8 @@ agents:
   # phase over adw_modules/quality.py. See SKILL.md hard rule 8.
 
   - name: reviewer
-    coding_agent: agy
-    model: gemini-3.1-pro          # free Gemini quota, and a different model family than
-    thinking: high                 # the builder — cross-family review catches shared blind spots
+    model: opus                    # a tier above the builder — on a Claude-only roster
+    thinking: high                 # that is the only blind-spot diversity left
     color: "#fb7185"
     purpose: Confirm that what was built is what was asked for; change nothing.
     prompt_engineering:
@@ -119,8 +121,7 @@ agents:
       - Write
 
   - name: documenter
-    coding_agent: agy
-    model: gemini-3.6-flash        # free Gemini quota — writing up a diff is mechanical
+    model: haiku                   # writing up a diff is mechanical
     thinking: low
     color: "#e879f9"
     purpose: Write up the change that was just made, from the diff; document only.
