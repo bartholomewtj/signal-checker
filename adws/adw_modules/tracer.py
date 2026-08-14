@@ -248,6 +248,37 @@ class Tracer:
              json.dumps([c.model_dump() for c in report.checks]), now_iso()),
         )
 
+    # ── guards (Phase 2c: budget + checkpointing) ────────────────────────────
+    def total_spend(self) -> float:
+        """Every dollar this box's trace has recorded, across all sessions.
+
+        Deliberately the whole db, not just this adw_id: the budget is the
+        BOX's allowance, and a second workflow in the same box spends the
+        same subscription. Matches what `sbx.py status` prints.
+        """
+        row = self.conn.execute("SELECT COALESCE(SUM(total_cost), 0) FROM sessions").fetchone()
+        return float(row[0] or 0.0)
+
+    def completed_envelopes(self, adw_id: str) -> dict[str, str]:
+        """phase name -> its valid envelope JSON, for phases that succeeded.
+
+        The checkpoint. Keyed by phase NAME (not phase_id) because a resumed
+        run mints new phase_ids as it continues the sequence. The newest
+        matching envelope per phase name wins, in case a phase name repeats
+        (a joined run that re-enters the same phase).
+        """
+        rows = self.conn.execute(
+            "SELECT phases.name, envelopes.payload_json, envelopes.created_at "
+            "FROM envelopes JOIN phases ON envelopes.phase_id = phases.phase_id "
+            "WHERE phases.adw_id = ? AND phases.status = 'success' AND envelopes.valid = 1 "
+            "ORDER BY envelopes.created_at ASC",
+            (adw_id,),
+        ).fetchall()
+        out: dict[str, str] = {}
+        for name, payload_json, _created_at in rows:
+            out[name] = payload_json   # later rows overwrite earlier ones -- newest wins
+        return out
+
     def agent_session_row(self, adw_id: str, agent: AgentConfig, session_id: str,
                           context_tokens: int = 0, context_window: int = 0) -> None:
         """The agent's config row is the source of truth for its label and color.

@@ -13,7 +13,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import agents, git_helper
+from . import agents, control, git_helper
 from .console import Console
 from .data_types import AgentCall, EnvelopeBase, EventRecord, Phase, PhaseParams
 from .utils import ensure_dir, now_iso
@@ -57,6 +57,18 @@ class Run:
         self.agent_map: dict = (json.loads(self._agent_map_path.read_text())
                                 if self._agent_map_path.exists() else {})
 
+        # Phase 2c guards: budget threshold (set at `up` time, passed in as an
+        # env var by `run`) and the checkpoint -- phases that already
+        # succeeded in an earlier invocation of this adw_id, replayed instead
+        # of re-run.
+        self.budget_usd = control.budget_from_env()
+        self.completed_envelopes = tracer.completed_envelopes(adw_id)
+        if self.completed_envelopes:
+            self.console.note(
+                f"resuming: {len(self.completed_envelopes)} phase(s) already "
+                f"finished last time will be replayed, not re-run "
+                f"({', '.join(sorted(self.completed_envelopes))})")
+
     # ── agent map (adw_id -> per-agent coding-agent session ids) ────────────
     def save_agent_map(self, agent: str, entry: dict) -> None:
         self.agent_map[agent] = entry
@@ -68,10 +80,31 @@ class Run:
         self.cost += cost
         self.tracer.session_add_usage(self.adw_id, tokens, cost)
 
+    def _check_budget(self, next_phase: str) -> None:
+        """Stop the run if it has spent its allowance. Called at every phase
+        boundary -- the same non-LLM control path a pause/stop file would use.
+        Checked BEFORE the phase opens, so a breach never leaves a half-run
+        phase behind."""
+        if not self.budget_usd:
+            return
+        spend = self.tracer.total_spend()
+        ok, message = control.budget_verdict(spend, self.budget_usd)
+        if ok:
+            return
+        self.tracer.event(EventRecord(adw_id=self.adw_id, phase_id="",
+                                      type="error", name="budget_exceeded",
+                                      payload={"spend": spend,
+                                               "budget": self.budget_usd,
+                                               "stopped_before": next_phase}))
+        self.tracer.session_finish(self.adw_id, ok=False)
+        print(message)
+        raise control.BudgetExceeded(2)
+
     # ── the phase primitive ─────────────────────────────────────────────────
     @contextmanager
     def phase(self, params: PhaseParams):
         self._seq += 1
+        self._check_budget(params.name)
         phase = Phase(phase_id=f"{self.adw_id}_{self._seq:02d}_{params.name}",
                       adw_id=self.adw_id, seq=self._seq, params=params,
                       status="running", started_at=now_iso())

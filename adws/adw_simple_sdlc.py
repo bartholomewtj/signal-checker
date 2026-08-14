@@ -1,6 +1,7 @@
 #!/usr/bin/env -S uv run
 # /// script
 # dependencies = ["pydantic", "python-dotenv", "pyyaml", "rich"]
+# requires-python = ">=3.12"
 # ///
 """ADW Simple SDLC — plan, build, test, review, document, committing as it goes.
 
@@ -9,7 +10,8 @@ Usage:
 
 Phases: engineer(request) -> planner -> git(commit_plan)
         -> builder -> code(test) [-> builder(fix) -> code(test) ... bounded]
-        -> reviewer [-> builder(revise) -> reviewer ... bounded]
+        -> code(review_diff) -> reviewer
+           [-> builder(revise) -> code(review_diff) -> reviewer ... bounded]
         -> code(retest, only if a revision changed code)
         -> git(commit_build) -> code(changes) -> documenter -> git(commit_docs)
 
@@ -56,6 +58,8 @@ MAX_REVISION_LOOPS = 2
 DOCUMENT_NOTES = ("Read diff_path in full before writing. Document only what the "
                   "diff shows, then copy the write-up into app_docs/ as your task "
                   "describes.")
+REVIEW_NOTES = ("Read diff_path in full before ruling. changed_files is from git, "
+                "not the builder. Judge the code on disk.")
 
 
 def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw_id: str | None = None) -> int:
@@ -87,6 +91,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     with run.phase(PhaseParams(name="commit_plan", kind="code", owner="git",
                                description="Put the spec on record before any code exists to blur it")) as ph:
         commit(ph, plan)
+    review_base = git_helper.rev("HEAD")   # plan commit — reviewer's diff is "since this"
 
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
                                description="Implement the plan exactly")) as ph:
@@ -113,13 +118,31 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
     review = None
     revised = False
+    last_fp = None
     for i in range(1, MAX_REVISION_LOOPS + 1):
+        with run.phase(PhaseParams(name=f"review_diff_{i}", kind="code", owner="git",
+                                   description="Diff the working tree against the plan commit — "
+                                               "the reviewer's work-list, not the builder's file list")) as ph:
+            changeset = changes.capture(run, ChangeCapture(base=review_base))
+            ph.log(base=f"{changeset.base.label} @ {changeset.base.commit[:7]}",
+                   reason=changeset.base.reason,
+                   files=len(changeset.files) + len(changeset.untracked),
+                   lines=f"+{changeset.insertions} -{changeset.deletions}",
+                   diff=changeset.diff_path)
+
+        stalled = False
         with run.phase(PhaseParams(name=f"review_{i}", kind="agent", owner="reviewer",
                                    description="Confirm the build matches the plan")) as ph:
-            review = ph.call(AgentCall(output_type=ReviewOutput, prompt=prompt, previous=build,
+            review = ph.call(AgentCall(output_type=ReviewOutput, prompt=prompt,
+                                       previous=changes.as_envelope(changeset, REVIEW_NOTES),
                                        gates=[gates.artifacts_exist, gates.verdict_consistent]))
+            fp = utils.review_fingerprint(review)
+            stalled = last_fp is not None and fp == last_fp
+            ph.log(fingerprint=fp, stall=stalled)
+            if not stalled:
+                last_fp = fp
 
-        if review.approved or i == MAX_REVISION_LOOPS:
+        if review.approved or stalled or i == MAX_REVISION_LOOPS:
             break
 
         with run.phase(PhaseParams(name=f"revise_{i}", kind="agent", owner="builder", retries=1,
