@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import secrets
 import subprocess
@@ -61,6 +63,18 @@ def resolve_prompt(arg: str) -> str:
     except OSError:
         pass
     return arg
+
+
+def review_fingerprint(review) -> str:
+    """Stable id of what a review asked to change. Same ask → same hash.
+
+    Used to stop a revise loop that is repeating itself. Order of findings
+    does not matter; only the unmet requirements and blocking items do.
+    """
+    unmet = sorted(f.requirement for f in getattr(review, "findings", []) if not f.met)
+    blocking = sorted(getattr(review, "blocking", []))
+    payload = json.dumps({"blocking": blocking, "unmet": unmet}, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def engineer_name() -> str:

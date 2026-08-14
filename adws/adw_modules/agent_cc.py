@@ -18,6 +18,15 @@ Two things differ from pi and both are load-bearing:
    the result event, but it is the notional API price of the turn, not money
    leaving an account. It is recorded so the trace stays comparable with pi
    runs; read it as "what this would have cost on the API".
+
+3. **Rate limits are a first-class error.** The terminal `result` event is
+   classified (structured fields first, string matching only as fallback --
+   see adw_modules/control.py) before its returncode is trusted. A rate limit
+   raises `RateLimited` with a sleep duration, so the caller can wait and send
+   the identical request again rather than burning a JSON-retry or a gate
+   correction on it. Any other terminal error this adapter does not recognise
+   raises `UpstreamError` and is never retried -- an unfamiliar shape is more
+   likely a changed CLI than a blip.
 """
 
 from __future__ import annotations
@@ -31,6 +40,7 @@ import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
+from .control import RateLimited, UpstreamError, classify_result_event, fake_rate_limit_due, reset_delay
 from .data_types import PiRequest, PiResult
 from .utils import now_iso, operator_env
 
@@ -323,6 +333,13 @@ def run(request: PiRequest, on_event: Optional[Callable[[dict], None]] = None,
     can record it as killable — a hung coding agent is otherwise a pid you have
     to hunt for in `ps` while the run sits there.
     """
+    faked = fake_rate_limit_due()
+    if faked is not None:
+        # Deliberately before Popen: a drill must not cost a call, need a
+        # network, or depend on a box being logged in.
+        seconds, why = reset_delay(faked)
+        raise RateLimited(f"(fake) rate limited — {why}", seconds, faked)
+
     _, model_id = resolve_model(request.model)
     session_dir = Path(request.session_dir)
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -388,6 +405,7 @@ def run(request: PiRequest, on_event: Optional[Callable[[dict], None]] = None,
     process.stdin.write(request.prompt)
     process.stdin.close()
 
+    terminal: dict | None = None   # the last `result` event seen, for classification below
     with raw_path.open("a") as raw:
         assert process.stdout is not None
         for line in process.stdout:
@@ -423,6 +441,7 @@ def run(request: PiRequest, on_event: Optional[Callable[[dict], None]] = None,
                 window = _reported_window(event, model_id)
                 if window:
                     result.context_window = window
+                terminal = event
 
             if on_event:
                 on_event(event)
@@ -437,6 +456,22 @@ def run(request: PiRequest, on_event: Optional[Callable[[dict], None]] = None,
     # start never wrote, turning one failure into every failure after it.
     if starting and result.returncode == 0:
         _record_session(session_dir, request.session_id)
+
+    if terminal is not None:
+        verdict, detail = classify_result_event(terminal)
+        if verdict == "rate_limit":
+            seconds, why = reset_delay(terminal)
+            raise RateLimited(f"rate limited — {detail}; {why}", seconds, terminal)
+        if verdict == "upstream":
+            raise UpstreamError(
+                "Claude Code ended with an error this adapter does not "
+                "recognise, so it is NOT being retried — an unfamiliar error "
+                "is more likely a changed CLI than a blip.\n"
+                f"  the CLI said: {detail}\n"
+                "  what to do: read the last lines of the raw stream at\n"
+                f"    {raw_path}\n"
+                "  if it turns out to be a rate limit, add its shape to "
+                "RATE_LIMIT_TYPES / RATE_LIMIT_MARKERS in adw_modules/control.py")
 
     if result.returncode != 0 and not result.text:
         raise RuntimeError(f"claude exited {result.returncode}: {stderr.strip()[-800:]}")

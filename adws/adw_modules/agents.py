@@ -15,7 +15,7 @@ from typing import Optional
 
 import yaml
 
-from . import agent_agy, agent_cc, agent_pi, permissions, prompts
+from . import agent_cc, agent_pi, control, permissions, prompts
 from .data_types import (AgentCall, AgentConfig, EnvelopeBase, EventRecord,
                          GateCheck, GateReport, Phase, PiRequest, PiResult,
                          SSSFConfig, UsageBreakdown)
@@ -29,8 +29,6 @@ JSON_FIX_ATTEMPTS = 2      # continue-with-correction attempts for malformed JSO
 INTERFACES = {
     "pi": agent_pi,
     "claude_code": agent_cc,
-    "agy": agent_agy,
-    "gemini": agent_agy,
 }
 
 
@@ -45,7 +43,35 @@ class GateFailure(RuntimeError):
 
 # ── config ───────────────────────────────────────────────────────────────────
 
-def load_config(path: str = "adws/adw_sssf_config/sssf.config.yaml") -> SSSFConfig:
+ROSTERS_PATH = "adws/adw_sssf_config/rosters.yaml"
+ROSTER_MARKER = "adws/adw_sssf_config/.roster"
+ROSTER_KEYS = ("coding_agent", "model", "thinking")
+
+
+def load_rosters(path: str = ROSTERS_PATH) -> dict:
+    """The tier overlays, or {} when the repo has no rosters.yaml."""
+    if not Path(path).is_file():
+        return {}
+    return (yaml.safe_load(Path(path).read_text()) or {}).get("rosters", {}) or {}
+
+
+def active_roster(explicit: Optional[str] = None,
+                  marker: str = ROSTER_MARKER) -> Optional[str]:
+    """Which tier to apply: the flag, else the marker file, else none.
+
+    None means "use sssf.config.yaml exactly as written" — the pre-roster
+    behaviour, and what an unconfigured repo gets.
+    """
+    if explicit:
+        return explicit
+    p = Path(marker)
+    if p.is_file():
+        return p.read_text().strip() or None
+    return None
+
+
+def load_config(path: str = "adws/adw_sssf_config/sssf.config.yaml",
+                roster: Optional[str] = None) -> SSSFConfig:
     raw = yaml.safe_load(Path(path).read_text()) or {}
     defaults = raw.get("defaults", {}) or {}
     for agent in raw.get("agents", []) or []:
@@ -53,6 +79,29 @@ def load_config(path: str = "adws/adw_sssf_config/sssf.config.yaml") -> SSSFConf
             if key in defaults:
                 agent.setdefault(key, defaults[key])
         agent.setdefault("harness_engineering", defaults.get("harness_engineering", []))
+
+    # The roster overlay lands AFTER defaults, so a tier's model beats an
+    # inherited one, and BEFORE SSSFConfig(**raw), so validate() sees the
+    # models that will actually run. Structure — prompts, tools, writes —
+    # is never touched: a tier only says who runs each agent.
+    name = active_roster(roster)
+    if name:
+        rosters = load_rosters()
+        if name not in rosters:
+            raise SystemExit(f"roster {name!r} is not defined in {ROSTERS_PATH} — "
+                             f"available: {sorted(rosters) or '(none)'}")
+        overlay = (rosters[name] or {}).get("agents", {}) or {}
+        known = {a.get("name") for a in raw.get("agents", []) or []}
+        for missing in sorted(set(overlay) - known):
+            raise SystemExit(f"roster {name!r} assigns agent {missing!r}, which is not "
+                             f"in {path} — available: {sorted(known)}")
+        for agent in raw.get("agents", []) or []:
+            for key, value in (overlay.get(agent.get("name")) or {}).items():
+                if key not in ROSTER_KEYS:
+                    raise SystemExit(f"roster {name!r} sets {key!r} on {agent['name']!r}; "
+                                     f"a roster may only set {', '.join(ROSTER_KEYS)}")
+                agent[key] = value
+
     return SSSFConfig(**raw)
 
 
@@ -94,6 +143,24 @@ def validate(cfg: SSSFConfig, required: list[str]) -> None:
 
 def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     """One agent call: render prompts -> agent run -> typed parse -> gates -> envelope."""
+    stored = getattr(run, "completed_envelopes", {}).get(phase.params.name)
+    if stored is not None:
+        # This phase already finished in an earlier invocation of this same
+        # adw-id. Re-running the agent would pay for an answer we already
+        # have, and would probably give a different one -- which is worse.
+        try:
+            envelope = call.output_type.model_validate_json(stored)
+        except Exception as error:  # noqa: BLE001 -- a bad checkpoint must never be fatal
+            run.console.note(f"{phase.params.name}: stored envelope did not match "
+                             f"{call.output_type.__name__} ({error}) -- running the agent instead")
+        else:
+            run.console.note(f"{phase.params.name}: replayed from the previous "
+                             f"invocation (no agent call, no spend)")
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="log", name="replayed",
+                                         payload={"phase": phase.params.name}))
+            return envelope
+
     agent = resolve(run.cfg, phase.params.owner)
     coding_agent = interface(agent)
     agent_dir = run.session_dir / agent.name
@@ -143,13 +210,26 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             extensions=agent.harness_engineering,
             cwd=str(run.repo_root),
         )
-        result = coding_agent.run(
-            request,
-            on_event=_event_forwarder(run, phase, agent.name, coding_agent),
-            on_spawn=lambda pid: run.tracer.process_start(
-                run.adw_id, "agent", agent.name, pid,
-                f"{agent.coding_agent} {agent.name} {agent.model}"),
-            on_exit=lambda pid: run.tracer.process_end(run.adw_id, pid))
+        def _notify(message: str, sleep_seconds: float, detail: str) -> None:
+            run.console.note(message)
+            run.tracer.event(EventRecord(adw_id=run.adw_id, phase_id=phase.phase_id,
+                                         type="log", name="rate_limited",
+                                         payload={"sleep_seconds": sleep_seconds,
+                                                  "detail": detail}))
+
+        # Every send here -- the first prompt, a JSON retry, a gate correction
+        # -- is wrapped so a rate limit sleeps and re-sends the SAME request
+        # rather than spending one of the JSON-retry or gate-correction
+        # attempts on something that was never the agent's fault.
+        result = control.with_rate_limit_retries(
+            lambda: coding_agent.run(
+                request,
+                on_event=_event_forwarder(run, phase, agent.name, coding_agent),
+                on_spawn=lambda pid: run.tracer.process_start(
+                    run.adw_id, "agent", agent.name, pid,
+                    f"{agent.coding_agent} {agent.name} {agent.model}"),
+                on_exit=lambda pid: run.tracer.process_end(run.adw_id, pid)),
+            notify=_notify)
         run.add_usage(result.tokens, result.cost)
         spent.merge(result.usage)
         latest = result

@@ -19,8 +19,8 @@
 Confirm that the work reported in `previous_envelope` is what was asked for.
 
 1. Establish the spec: read `<context_handoff_dir>/plan.md` if it exists, else use `prompt`.
-2. Read the code that was actually written, starting from `previous_envelope.changed_files`.
-3. Rule on every requirement in the spec — one `findings` entry each, with evidence.
+2. Read `previous_envelope.diff_path` in full, then open every path in `previous_envelope.changed_files`. That list is from git, not the builder.
+3. Rule on every requirement in the spec — one `findings` entry each, with evidence. `met: true` only if you opened that file and `evidence` is a `file:line` you read.
 4. Write the review to `<context_handoff_dir>/review.md`, then emit your `Report` JSON.
 
 ## Report

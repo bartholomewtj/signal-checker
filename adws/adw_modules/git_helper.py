@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from . import control
+
 
 def _git(*args: str) -> str:
     result = subprocess.run(["git", *args], capture_output=True, text=True)
@@ -41,13 +43,24 @@ def repo_root() -> Path:
 
 
 def commit_all(message: str) -> str:
-    """Stage the working tree and commit it. Returns the new short sha."""
+    """Stage the working tree and commit it. Returns the new short sha.
+
+    A resumed run can reach a commit phase whose commit already landed last
+    time (the phase replayed everything up to here, then the checkpoint ran
+    out and this phase re-executes for real). That is not an error -- it is
+    exactly what "nothing to commit" would otherwise report as one. Detect
+    the no-op case first and hand back the sha already at HEAD.
+    """
     if not is_repo():
         raise RuntimeError(
             "not a git repository — a commit phase needs one. Run `git init` in the "
             "repo root (and make a first commit) before running an ADW that commits.")
     _git("add", "-A")
-    if not _git("status", "--porcelain"):
+    porcelain = _git("status", "--porcelain")
+    head_message = _git("log", "-1", "--pretty=%B") if ref_exists("HEAD") else ""
+    if control.commit_already_made(porcelain, head_message, message):
+        return _git("rev-parse", "--short", "HEAD")
+    if not porcelain:
         raise RuntimeError("nothing to commit — the preceding phases changed no files")
     _git("commit", "-m", message)
     return _git("rev-parse", "--short", "HEAD")

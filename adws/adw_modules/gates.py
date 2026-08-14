@@ -11,12 +11,24 @@ Gates check what is mechanically checkable; plan quality is a reviewer's job.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
 from .data_types import EnvelopeBase, GateReport
 
 TAIL_CHARS = 1000        # command output kept as evidence on a failure
+
+# A place the reviewer claims to have opened: dir/file:line or file.ext:line.
+# "looks good" and a blank string do not match.
+_FILE_LINE = re.compile(
+    r'(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+:\d+'
+    r'|[A-Za-z0-9_.-]+\.[A-Za-z0-9]+:\d+'
+)
+
+
+def _has_file_line(evidence: str) -> bool:
+    return bool(_FILE_LINE.search(evidence or ""))
 
 
 def _size(path: Path) -> str:
@@ -75,12 +87,22 @@ def verdict_consistent(envelope: EnvelopeBase, run) -> GateReport:
     envelope against itself: an approval that ships blocking items, or a
     rejection that names no problem, is a claim the harness can refute without
     reading a line of the diff.
+
+    `met: true` with no `file:line` evidence is treated as unmet. Missing
+    proof is a no, not a yes.
     """
     report = GateReport()
     approved = bool(getattr(envelope, "approved", False))
     blocking = list(getattr(envelope, "blocking", []))
-    unmet = [f.requirement for f in getattr(envelope, "findings", []) if not f.met]
+    findings = list(getattr(envelope, "findings", []))
+    bare = [f.requirement for f in findings
+            if f.met and not _has_file_line(getattr(f, "evidence", ""))]
+    unmet = [f.requirement for f in findings if not f.met] + bare
 
+    report.check("met findings name a place", not bare,
+                 "every met finding has file:line evidence" if not bare
+                 else f"{len(bare)} met finding(s) with no file:line evidence: "
+                      + "; ".join(bare))
     report.check("approved vs blocking", not (approved and blocking),
                  "no blocking items" if not blocking
                  else f"{len(blocking)} blocking item(s) while approved=true"

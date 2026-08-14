@@ -303,7 +303,7 @@ class PromptEngineering(BaseModel):
 
 class AgentConfig(BaseModel):
     name: str
-    coding_agent: Literal["pi", "claude_code", "agy", "gemini"] = "claude_code"
+    coding_agent: Literal["pi", "claude_code"] = "claude_code"
     model: str = "sonnet"
     thinking: str = "medium"        # off | minimal | low | medium | high | xhigh | max
     color: str = ""                 # hex swatch for this agent's lane in the UI
@@ -323,7 +323,7 @@ class AgentConfig(BaseModel):
 
 
 class ConfigDefaults(BaseModel):
-    coding_agent: Literal["pi", "claude_code", "agy", "gemini"] = "claude_code"
+    coding_agent: Literal["pi", "claude_code"] = "claude_code"
     model: str = "sonnet"
     thinking: str = "medium"
     color: str = ""

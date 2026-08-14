@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import time
 from functools import lru_cache
@@ -19,10 +20,36 @@ from typing import Callable, Optional
 from .data_types import PiRequest, PiResult
 from .utils import now_iso, operator_env
 
-PI_PATH = os.environ.get("PI_PATH", "pi")
-# On Windows, npm installs pi as a .cmd shim; cmd.exe truncates argv at
-# newlines, so the multi-line --system-prompt never survives the shim. Point
-# PI_PATH at pi's dist/cli.js and it runs under node directly.
+
+def _resolve_cli() -> str:
+    """Where pi actually is, preferring its dist/cli.js over npm's shim.
+
+    On Windows npm installs pi as a .cmd shim and cmd.exe truncates argv at
+    the first newline, so the multi-line --system-prompt never survives it:
+    the agent runs with almost no instructions and returns a plausible-looking
+    wrong answer rather than crashing. The shim's package ships the real
+    entrypoint as dist/cli.js; run that under node instead.
+
+    Mirrors agent_cc._resolve_cli(), which solves the same shim problem for
+    the claude CLI. Set PI_PATH to override, on any platform.
+    """
+    override = os.environ.get("PI_PATH")
+    if override:
+        return override
+    found = shutil.which("pi")
+    if not found:
+        return "pi"                           # let the OS produce the error
+    path = Path(found)
+    if path.suffix.lower() in (".cmd", ".bat", ".ps1"):
+        # npm layout: <prefix>/pi.cmd next to <prefix>/node_modules/<pkg>/
+        cli = (path.parent / "node_modules" / "@earendil-works"
+               / "pi-coding-agent" / "dist" / "cli.js")
+        if cli.is_file():
+            return str(cli)
+    return str(path)
+
+
+PI_PATH = _resolve_cli()
 PI_CMD = (["node", PI_PATH] if PI_PATH.lower().endswith(".js") else [PI_PATH])
 MODELS_JSON = os.environ.get("PI_MODELS_PATH",
                              str(Path.home() / ".pi" / "agent" / "models.json"))
@@ -66,6 +93,54 @@ def _pi_catalog() -> list[tuple[str, str, int]]:
         except ValueError:
             continue
     return rows
+
+
+# The roster writes `tools:` in Claude Code's vocabulary, because claude_code is
+# the default runtime. A roster tier can flip an agent to pi without touching
+# that list, and pi's names are different — so pi matched none of them, filtered
+# every tool away, and the agent ran with no way to read or write anything. It
+# did not crash: it reported "no shell or filesystem tool was available" inside a
+# well-formed envelope, and only the artifact gate caught it.
+#
+# Translate here, at the boundary that knows both vocabularies, so `tools:` stays
+# one list that means the same thing whichever runtime a tier picks.
+CLAUDE_TO_PI_TOOLS = {
+    "Read": ["read"],
+    "Bash": ["bash"],
+    "Edit": ["edit"],
+    "Write": ["write"],
+    "Grep": ["grep"],
+    # Claude's Glob finds files by pattern; pi splits that across find and ls.
+    # Granting both is no wider than Glob already is, and the pi-native roster
+    # upstream lists them together for the same reason.
+    "Glob": ["find", "ls"],
+    # Claude Code's built-in subagents. pi's equivalent arrives through the
+    # subagents.ts extension as subagent_*, which an agent names itself, so
+    # there is nothing to map this to — drop it rather than pass an unknown
+    # name pi would silently ignore.
+    "Task": [],
+}
+
+
+def translate_tools(tools: Optional[list[str]]) -> list[str]:
+    """Config tool names in pi's vocabulary.
+
+    Already-lowercase names pass through untouched: they are either pi builtins
+    or tools registered by a harness_engineering extension, which pi filters on
+    the same list.
+    """
+    if not tools:
+        return []
+    out: list[str] = []
+    for name in tools:
+        if name in CLAUDE_TO_PI_TOOLS:
+            out.extend(CLAUDE_TO_PI_TOOLS[name])
+        elif name.islower():
+            out.append(name)
+        # Anything else is a capitalised name with no pi equivalent. Dropping it
+        # is deliberate: passing it through is what produced a toolless agent.
+    seen = set()
+    return [t for t in out if not (t in seen or seen.add(t))]
 
 
 def resolve_model(pattern: str) -> tuple[str, str]:
@@ -227,8 +302,9 @@ def run(request: PiRequest, on_event: Optional[Callable[[dict], None]] = None,
         "--session-dir", request.session_dir,
         "--system-prompt", request.system_prompt,
     ]
-    if request.tools:
-        cmd += ["--tools", ",".join(request.tools)]
+    tools = translate_tools(request.tools)
+    if tools:
+        cmd += ["--tools", ",".join(tools)]
     for extension in request.extensions:
         cmd += ["-e", extension]
     cmd.append(request.prompt)
