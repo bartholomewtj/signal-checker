@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grok-trading-test · control panel</title>
+<script src="/lightweight-charts.js"></script>
+<style>
+  :root {
+    --bg: #12161c; --panel: #1a2028; --border: #2a323d;
+    --ink: #e6e9ee; --ink2: #9aa4b2; --ink3: #6b7684;
+    --up: #26a69a; --down: #ef5350; --is: #3d6ea8; --oos: #c4922a;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink);
+         font: 14px/1.45 system-ui, "Segoe UI", sans-serif; padding: 16px; }
+  h1 { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+  h1 span { color: var(--ink3); font-weight: 400; }
+  .lead { color: var(--ink2); font-size: 13px; margin-bottom: 14px; max-width: 820px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 14px; }
+  label.field { display: flex; flex-direction: column; gap: 4px; color: var(--ink2); font-size: 12px; }
+  select, button, input { background: var(--panel); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
+    font: inherit; }
+  button { cursor: pointer; }
+  button.primary { background: var(--is); border-color: var(--is); color: #fff; }
+  button.recalc { background: var(--oos); border-color: var(--oos); color: #12161c; font-weight: 600; }
+  .chart-legend .reset {
+    cursor: pointer;
+    border: 1px solid var(--border); padding: 2px 8px; color: var(--ink2);
+  }
+  .chart-legend .reset:hover { color: var(--ink); border-color: var(--ink3); }
+  .chart-legend .sel-window[aria-pressed="true"] {
+    background: var(--oos); border-color: var(--oos); color: #12161c;
+  }
+  #price.selecting, #equity.selecting { cursor: crosshair; }
+  button:disabled { opacity: .5; cursor: wait; }
+  .section.off { opacity: 0.38; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+           gap: 8px; margin-bottom: 12px; }
+  .tile { background: var(--panel); border: 1px solid var(--border);
+          border-radius: 8px; padding: 10px 12px; }
+  .tile .k { color: var(--ink2); font-size: 12px; }
+  .tile .v { font-size: 20px; font-weight: 600; margin-top: 2px;
+             font-variant-numeric: tabular-nums; }
+  .pos { color: var(--up); } .neg { color: var(--down); }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  @media (max-width: 800px) { .split { grid-template-columns: 1fr; } }
+  .section { background: var(--panel); border: 1px solid var(--border);
+             border-radius: 8px; padding: 12px; }
+  .section h2 { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+  .section.is { border-top: 3px solid var(--is); }
+  .section.oos { border-top: 3px solid var(--oos); }
+  .metrics { display: flex; gap: 18px; flex-wrap: wrap; }
+  .metrics div { font-variant-numeric: tabular-nums; }
+  .metrics .k { color: var(--ink2); font-size: 12px; }
+  .why { background: var(--panel); border: 1px solid var(--border);
+         border-radius: 8px; padding: 12px; margin-bottom: 12px; color: var(--ink2); }
+  .panel { background: var(--panel); border: 1px solid var(--border);
+           border-radius: 8px; padding: 10px; margin-bottom: 12px; }
+  .panel h2 { font-size: 13px; color: var(--ink2); font-weight: 600; margin: 2px 4px 8px; }
+  #status { color: var(--ink3); font-size: 12px; }
+  .err { color: var(--down); }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px;
+           font-size: 13px; font-weight: 600; }
+  .badge.profitable { background: #14342f; color: var(--up); }
+  .badge.not.profitable, .badge.not-profitable { background: #3a2224; color: var(--down); }
+  .badge.not.proven, .badge.not-proven { background: #3a3320; color: #d9b45b; }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+                  margin: 0 4px 8px; font-size: 12px; color: var(--ink2); }
+  .chart-legend .item { display: flex; align-items: center; gap: 6px;
+                        background: none; border: none; color: inherit; font: inherit;
+                        padding: 2px 4px; border-radius: 4px; }
+  .chart-legend .item.tog { cursor: pointer; }
+  .chart-legend .item.tog:hover { color: var(--ink); }
+  .chart-legend .item.tog[aria-pressed="false"] { opacity: 0.38; }
+  .chart-legend .item.tog[aria-pressed="false"] .swatch { background: transparent; }
+  .swatch { width: 22px; height: 14px; border-radius: 2px; display: inline-block; }
+  .swatch.is { background: rgba(61,110,168,0.55); border: 1px solid #3d6ea8; }
+  .swatch.oos { background: rgba(196,146,42,0.50); border: 1px solid #c4922a; }
+  .swatch.split { width: 14px; height: 0; border-top: 2px dashed #e6e9ee; background: none; }
+  #price, #equity { width: 100%; position: relative; user-select: none; }
+  #price { height: 380px; }
+  #equity { height: 220px; }
+  .close-layer {
+    position: absolute; inset: 0; pointer-events: none;
+    overflow: hidden; z-index: 4;
+  }
+  .close-tri {
+    position: absolute; width: 0; height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    transform: translate(-50%, 0);
+  }
+  .close-tri.dn { border-top: 7px solid #a855f7; }
+  .close-tri.up { border-bottom: 7px solid #a855f7; }
+  .range-overlay {
+    display: none; position: absolute; top: 0; bottom: 0; z-index: 5;
+    background: rgba(230,233,238,0.14);
+    border-left: 1px solid rgba(230,233,238,0.5);
+    border-right: 1px solid rgba(230,233,238,0.5);
+    pointer-events: none;
+  }
+  .range-overlay.on { display: block; }
+</style>
+</head>
+<body>
+<h1>grok-trading-test <span>· control panel</span></h1>
+<p class="lead">
+  In-sample is the first 70% of whatever window is loaded. Holdout is the last 30%.
+  Click the blue or amber box in a chart legend to hide that window and
+  <strong>restart equity at $100k</strong> for the one that stays on.
+  Click <strong>Select window</strong>, then drag across a chart to recalculate that period.
+</p>
+
+<div class="bar">
+  <label class="field">Idea
+    <select id="idea"></select>
+  </label>
+  <label class="field">Data
+    <select id="symbol"></select>
+  </label>
+  <label class="field">Timeframe
+    <select id="timeframe"></select>
+  </label>
+  <label class="field">From
+    <input type="date" id="start">
+  </label>
+  <label class="field">To
+    <input type="date" id="end">
+  </label>
+  <button class="primary" id="run">Run full period</button>
+  <button class="recalc" id="recalc">Recalculate window</button>
+  <input type="checkbox" id="tog-is" checked hidden>
+  <input type="checkbox" id="tog-oos" checked hidden>
+  <span id="status"></span>
+</div>
+
+<div class="tiles" id="tiles"></div>
+
+<div class="split">
+  <div class="section is">
+    <h2>In-sample (first 70% of this window)</h2>
+    <div class="metrics" id="is-metrics"></div>
+  </div>
+  <div class="section oos">
+    <h2>Holdout / out-of-sample (last 30%)</h2>
+    <div class="metrics" id="oos-metrics"></div>
+  </div>
+</div>
+
+<div class="why" id="why">Load an idea to see the verdict and why.</div>
+
+<div class="panel">
+  <h2>Price (markers are next-bar-open fills)</h2>
+  <div class="chart-legend" aria-label="In-sample versus holdout legend">
+    <button type="button" class="item tog" data-seg="is" aria-pressed="true" title="Show or hide in-sample">
+      <span class="swatch is"></span> In-sample (first 70%)
+    </button>
+    <button type="button" class="item tog" data-seg="oos" aria-pressed="true" title="Show or hide holdout">
+      <span class="swatch oos"></span> Holdout / out-of-sample (last 30%)
+    </button>
+    <span class="item"><span class="swatch split"></span> Split</span>
+    <button type="button" class="reset sel-window" aria-pressed="false" title="Then drag across the chart to pick a period">Select window</button>
+    <button type="button" class="reset" id="reset" title="Reset to the full period and fit the charts">Reset</button>
+  </div>
+  <div id="price"></div>
+</div>
+<div class="panel">
+  <h2>Equity ($100k start). Use Select window, then drag a period to recalculate it.</h2>
+  <div class="chart-legend" aria-label="In-sample versus holdout legend">
+    <button type="button" class="item tog" data-seg="is" aria-pressed="true" title="Show or hide in-sample">
+      <span class="swatch is"></span> In-sample (first 70%)
+    </button>
+    <button type="button" class="item tog" data-seg="oos" aria-pressed="true" title="Show or hide holdout">
+      <span class="swatch oos"></span> Holdout / out-of-sample (last 30%)
+    </button>
+    <span class="item"><span class="swatch split"></span> Split</span>
+    <button type="button" class="reset sel-window" aria-pressed="false" title="Then drag across the chart to pick a period">Select window</button>
+    <button type="button" class="reset" title="Reset to the full period and fit the charts">Reset</button>
+  </div>
+  <div id="equity"></div>
+</div>
+
+<script>
+const ideaSel = document.getElementById("idea");
+const symbolSel = document.getElementById("symbol");
+const tfSel = document.getElementById("timeframe");
+const startEl = document.getElementById("start");
+const endEl = document.getElementById("end");
+const statusEl = document.getElementById("status");
+let catalogData = null;
+let last = null;
+let parentStart = null;
+let parentEnd = null;
+let dragStart = null;
+let dragEnd = null;
+let selectWindow = false;
+let priceChart = null;
+let equityChart = null;
+let running = false;
+let unbindSelect = [];
+
+function pct(x) { return (x * 100).toFixed(2) + "%"; }
+function num(x) { return (x >= 0 ? "+" : "") + pct(x); }
+function cls(x) { return x > 0 ? "pos" : x < 0 ? "neg" : ""; }
+function badgeClass(v) {
+  if (v === "profitable") return "badge profitable";
+  if (v === "not profitable") return "badge not-profitable";
+  return "badge not-proven";
+}
+function isoDate(s) { return (s || "").slice(0, 10); }
+
+function setStatus(msg, err) {
+  statusEl.textContent = msg || "";
+  statusEl.className = err ? "err" : "";
+}
+
+function selectedPath() {
+  return tfSel.value;
+}
+
+function currentSymbol() {
+  return catalogData && catalogData.symbols
+    ? catalogData.symbols.find(s => s.id === symbolSel.value)
+    : null;
+}
+
+function fillTimeframes(preferred) {
+  const symbol = currentSymbol();
+  const tfs = symbol ? symbol.timeframes : [];
+  const keep = preferred || (tfSel.options[tfSel.selectedIndex] || {}).text;
+  tfSel.innerHTML = tfs.map(t =>
+    `<option value="${t.path}">${t.label}</option>`).join("");
+  const match = [...tfSel.options].find(o =>
+    o.text === keep || o.value === keep);
+  if (match) {
+    tfSel.value = match.value;
+    return;
+  }
+  const twelve = [...tfSel.options].find(o => o.text === "12h");
+  if (twelve) tfSel.value = twelve.value;
+}
+
+async function loadCatalog() {
+  const res = await fetch("/api/catalog");
+  catalogData = await res.json();
+  ideaSel.innerHTML = catalogData.ideas.map(i =>
+    `<option value="${i.name}">${i.name}</option>`).join("");
+  const groups = {};
+  for (const s of catalogData.symbols) {
+    (groups[s.group] ||= []).push(s);
+  }
+  const order = ["Crypto", "Equities", "Fixtures"];
+  symbolSel.innerHTML = order.filter(g => groups[g]).map(g =>
+    `<optgroup label="${g}">${groups[g].map(s =>
+      `<option value="${s.id}">${s.label}</option>`).join("")}</optgroup>`
+  ).join("");
+  const dip = [...ideaSel.options].find(o => o.value === "devma");
+  if (dip) ideaSel.value = "devma";
+  const btc = [...symbolSel.options].find(o => o.value === "BTC-USDT");
+  if (btc) {
+    symbolSel.value = "BTC-USDT";
+    fillTimeframes("12h");
+    return;
+  }
+  const planted = [...symbolSel.options].find(o => o.value === "planted_edge");
+  if (planted) {
+    symbolSel.value = planted.value;
+    ideaSel.value = "sample_dip";
+  }
+  fillTimeframes();
+}
+
+function selectedSegments() {
+  const segs = [];
+  if (document.getElementById("tog-is").checked) segs.push("is");
+  if (document.getElementById("tog-oos").checked) segs.push("oos");
+  return segs;
+}
+
+function syncLegendButtons() {
+  const on = {
+    is: document.getElementById("tog-is").checked,
+    oos: document.getElementById("tog-oos").checked,
+  };
+  document.querySelectorAll(".chart-legend .item.tog").forEach(btn => {
+    const pressed = !!on[btn.dataset.seg];
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+  });
+}
+
+async function run(mode) {
+  const segs = selectedSegments();
+  if (!segs.length) {
+    setStatus("Leave in-sample, holdout, or both on.", true);
+    return;
+  }
+  if (running) return;
+  running = true;
+  const btn = document.getElementById(mode === "window" ? "recalc" : "run");
+  if (btn) btn.disabled = true;
+  const labels = {full: "Running full period…", window: "Recalculating date window…", toggle: "Restarting equity for the selected window…"};
+  setStatus(labels[mode] || "Running…");
+  const body = {
+    idea: ideaSel.value,
+    data: selectedPath(),
+    segments: segs,
+  };
+  if (mode === "toggle" && parentStart && parentEnd) {
+    body.start = parentStart;
+    body.end = parentEnd;
+  } else if (mode === "window" && dragStart && dragEnd) {
+    body.start = dragStart;
+    body.end = dragEnd;
+    dragStart = dragEnd = null;
+  } else if (mode !== "full") {
+    body.start = startEl.value || null;
+    body.end = endEl.value || null;
+  }
+  try {
+    const res = await fetch("/api/run", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    last = data;
+    if (mode !== "toggle") {
+      parentStart = data.parent_start || data.window_start;
+      parentEnd = data.parent_end || data.window_end;
+      startEl.value = isoDate(parentStart);
+      endEl.value = isoDate(parentEnd);
+    }
+    render(data);
+    const extra = data.equity_restarted
+      ? "  ·  equity restarted at $100k"
+      : "  ·  continuous equity";
+    setStatus(
+      data.bar_count + " bars  " +
+      isoDate(data.window_start) + " → " + isoDate(data.window_end) +
+      "  ·  holdout starts " + isoDate(data.oos_start) + extra
+    );
+  } catch (e) {
+    setStatus(e.message, true);
+  } finally {
+    running = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+function render(a) {
+  document.getElementById("tiles").innerHTML = `
+    <div class="tile"><div class="k">Verdict</div>
+      <div class="v"><span class="${badgeClass(a.verdict)}">${a.verdict}</span></div></div>
+    <div class="tile"><div class="k">Trades</div><div class="v">${a.trade_count}</div></div>
+    <div class="tile"><div class="k">Return (net)</div>
+      <div class="v ${cls(a.net_return)}">${num(a.net_return)}</div></div>
+    <div class="tile"><div class="k">Sharpe (net)</div>
+      <div class="v ${cls(a.sharpe)}">${a.sharpe.toFixed(2)}</div></div>
+    <div class="tile"><div class="k">Return (gross)</div>
+      <div class="v ${cls(a.gross_return)}">${num(a.gross_return)}</div></div>
+    <div class="tile"><div class="k">Window</div>
+      <div class="v" style="font-size:14px">${isoDate(a.window_start)} → ${isoDate(a.window_end)}</div></div>`;
+
+  document.getElementById("is-metrics").innerHTML = `
+    <div><div class="k">Return</div><div class="${cls(a.in_sample.return)}">${num(a.in_sample.return)}</div></div>
+    <div><div class="k">Sharpe</div><div>${a.in_sample.sharpe.toFixed(2)}</div></div>
+    <div><div class="k">Trades</div><div>${a.in_sample.trade_count}</div></div>
+    <div><div class="k">Through</div><div>${isoDate(a.split_time)}</div></div>`;
+
+  document.getElementById("oos-metrics").innerHTML = `
+    <div><div class="k">Return</div><div class="${cls(a.oos.return)}">${num(a.oos.return)}</div></div>
+    <div><div class="k">Sharpe</div><div>${a.oos.sharpe.toFixed(2)}</div></div>
+    <div><div class="k">Trades</div><div>${a.oos.trade_count}</div></div>
+    <div><div class="k">From</div><div>${isoDate(a.oos_start)}</div></div>`;
+
+  document.getElementById("why").textContent = a.why;
+  document.querySelector(".section.is").classList.toggle("off", a.segment === "oos");
+  document.querySelector(".section.oos").classList.toggle("off", a.segment === "is");
+  drawCharts(a);
+}
+
+function tvTime(t) {
+  if (t && typeof t === "object" && t.year)
+    return `${t.year}-${String(t.month).padStart(2,"0")}-${String(t.day).padStart(2,"0")}`;
+  if (typeof t === "number") return new Date(t * 1000).toISOString().slice(0, 10);
+  return isoDate(String(t || ""));
+}
+
+function bandData(rows, a) {
+  const split = a.oos_start_tv;
+  return rows.map(row => ({
+    time: row.time,
+    value: 1,
+    color: row.time < split || String(row.time) < String(split)
+      ? "rgba(61,110,168,0.85)"
+      : "rgba(196,146,42,0.85)",
+  }));
+}
+
+function makeChart(el, height) {
+  const width = Math.max(el.clientWidth, el.parentElement ? el.parentElement.clientWidth : 0, 320);
+  return LightweightCharts.createChart(el, {
+    width: width,
+    height: height,
+    layout: {background: {color: "#1a2028"}, textColor: "#9aa4b2"},
+    grid: {vertLines: {color: "#232a33"}, horzLines: {color: "#232a33"}},
+    rightPriceScale: {borderColor: "#2a323d"},
+    timeScale: {borderColor: "#2a323d", timeVisible: true, secondsVisible: false},
+    crosshair: {mode: 0},
+    handleScroll: scrollOptions(),
+    handleScale: {axisPressedMouseMove: true, mouseWheel: true, pinch: true},
+  });
+}
+
+function isoFull(t) {
+  if (t && typeof t === "object" && t.year)
+    return `${t.year}-${String(t.month).padStart(2,"0")}-${String(t.day).padStart(2,"0")}`;
+  if (typeof t === "number") return new Date(t * 1000).toISOString().replace("Z", "");
+  return String(t || "").replace(/Z$/, "");
+}
+
+function timeAt(chart, x) {
+  const t = chart.timeScale().coordinateToTime(x);
+  if (t) return t;
+  const range = chart.timeScale().getVisibleRange();
+  if (!range) return null;
+  const left = chart.timeScale().timeToCoordinate(range.from);
+  if (left == null) return range.from;
+  return x < left ? range.from : range.to;
+}
+
+function scrollOptions() {
+  return {
+    mouseWheel: true,
+    pressedMouseMove: !selectWindow,
+    horzTouchDrag: !selectWindow,
+    vertTouchDrag: true,
+  };
+}
+
+function setSelectWindow(on) {
+  selectWindow = !!on;
+  document.querySelectorAll(".sel-window").forEach(btn => {
+    btn.setAttribute("aria-pressed", selectWindow ? "true" : "false");
+  });
+  document.querySelectorAll("#price, #equity").forEach(el => {
+    el.classList.toggle("selecting", selectWindow);
+  });
+  if (priceChart) priceChart.applyOptions({handleScroll: scrollOptions()});
+  if (equityChart) equityChart.applyOptions({handleScroll: scrollOptions()});
+}
+
+function bindRangeSelect(chart, el) {
+  const overlay = document.createElement("div");
+  overlay.className = "range-overlay";
+  el.appendChild(overlay);
+  let origin = null;
+
+  function pos(ev) {
+    return ev.clientX - el.getBoundingClientRect().left;
+  }
+
+  function onDown(ev) {
+    if (!selectWindow || ev.button !== 0) return;
+    const box = el.getBoundingClientRect();
+    if (ev.clientX > box.right - 64) return;
+    origin = pos(ev);
+    overlay.classList.add("on");
+    overlay.style.left = origin + "px";
+    overlay.style.width = "0px";
+    try { el.setPointerCapture(ev.pointerId); } catch (_) {}
+    ev.preventDefault();
+  }
+
+  function onMove(ev) {
+    if (origin == null) return;
+    const x = pos(ev);
+    overlay.style.left = Math.min(origin, x) + "px";
+    overlay.style.width = Math.abs(x - origin) + "px";
+  }
+
+  function onUp(ev) {
+    if (origin == null) return;
+    const x = pos(ev);
+    const startX = origin;
+    origin = null;
+    overlay.classList.remove("on");
+    if (Math.abs(x - startX) < 12) return;
+    const t1 = timeAt(chart, startX);
+    const t2 = timeAt(chart, x);
+    if (!t1 || !t2) return;
+    const a = isoFull(t1);
+    const b = isoFull(t2);
+    if (!a || !b || a === b) return;
+    const from = a < b ? a : b;
+    const to = a < b ? b : a;
+    startEl.value = isoDate(from);
+    endEl.value = isoDate(to);
+    dragStart = from;
+    dragEnd = to;
+    setSelectWindow(false);
+    run("window");
+  }
+
+  el.addEventListener("pointerdown", onDown, true);
+  el.addEventListener("pointermove", onMove, true);
+  el.addEventListener("pointerup", onUp, true);
+  el.addEventListener("pointercancel", onUp, true);
+  return () => {
+    el.removeEventListener("pointerdown", onDown, true);
+    el.removeEventListener("pointermove", onMove, true);
+    el.removeEventListener("pointerup", onUp, true);
+    el.removeEventListener("pointercancel", onUp, true);
+    overlay.remove();
+  };
+}
+
+function addBandStrip(chart, rows, a) {
+  const strip = chart.addHistogramSeries({
+    priceScaleId: "isband",
+    lastValueVisible: false,
+    priceLineVisible: false,
+    base: 0,
+  });
+  chart.priceScale("isband").applyOptions({
+    scaleMargins: {top: 0.92, bottom: 0},
+    borderVisible: false,
+  });
+  strip.setData(bandData(rows, a));
+  return strip;
+}
+
+function exitTv(trade, sample) {
+  if (trade.exit_time_tv != null) return trade.exit_time_tv;
+  if (!trade.exit_time) return null;
+  if (typeof sample === "number") {
+    const iso = String(trade.exit_time);
+    const utc = /Z$|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + "Z";
+    const ms = Date.parse(utc);
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+  }
+  return isoDate(trade.exit_time);
+}
+
+function paintCloseTriangles(chart, series, candles, trades, layer) {
+  layer.innerHTML = "";
+  if (!trades || !trades.length || !candles.length) return;
+  const sample = candles[0].time;
+  const byTime = new Map(candles.map(c => [String(c.time), c]));
+  const host = layer.parentElement;
+  const pane = host ? host.querySelector("canvas") : null;
+  const hostBox = host.getBoundingClientRect();
+  const paneBox = pane ? pane.getBoundingClientRect() : hostBox;
+  const dx = paneBox.left - hostBox.left;
+  const dy = paneBox.top - hostBox.top;
+  for (const trade of trades) {
+    const time = exitTv(trade, sample);
+    if (time == null) continue;
+    const x = chart.timeScale().timeToCoordinate(time);
+    if (x == null) continue;
+    const isLong = (trade.direction || "Long").toLowerCase().startsWith("long");
+    const candle = byTime.get(String(time));
+    const price = candle
+      ? (isLong ? candle.high : candle.low)
+      : trade.exit_price;
+    if (price == null) continue;
+    const y = series.priceToCoordinate(price);
+    if (y == null) continue;
+    const el = document.createElement("div");
+    el.className = "close-tri " + (isLong ? "dn" : "up");
+    el.style.left = (x + dx) + "px";
+    el.style.top = (y + dy + (isLong ? -9 : 2)) + "px";
+    layer.appendChild(el);
+  }
+}
+
+function drawCharts(a) {
+  if (typeof LightweightCharts === "undefined") {
+    throw new Error("TradingView Lightweight Charts failed to load. Restart: python run.py panel");
+  }
+  const candles = a.candles || [];
+  if (!candles.length || !a.equity.length) {
+    throw new Error("No candle/equity series in the result.");
+  }
+
+  unbindSelect.forEach(fn => fn());
+  unbindSelect = [];
+  if (priceChart) { priceChart.remove(); priceChart = null; }
+  if (equityChart) { equityChart.remove(); equityChart = null; }
+  const priceEl = document.getElementById("price");
+  const equityEl = document.getElementById("equity");
+  priceEl.innerHTML = "";
+  equityEl.innerHTML = "";
+
+  priceChart = makeChart(priceEl, 380);
+  equityChart = makeChart(equityEl, 220);
+
+  const candlesSeries = priceChart.addCandlestickSeries({
+    upColor: "#26a69a", downColor: "#ef5350",
+    wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+    borderVisible: false,
+  });
+  candlesSeries.setData(candles.map(c => ({
+    time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+  })));
+
+  const longs = a.trades.filter(t => (t.direction || "Long").toLowerCase().startsWith("long"));
+  const shorts = a.trades.filter(t => (t.direction || "").toLowerCase().startsWith("short"));
+  const markers = [];
+  longs.forEach(t => markers.push({
+    time: t.fill_time_tv, position: "belowBar", color: "#26a69a",
+    shape: "arrowUp", text: "L",
+  }));
+  shorts.forEach(t => markers.push({
+    time: t.fill_time_tv, position: "aboveBar", color: "#ef5350",
+    shape: "arrowDown", text: "S",
+  }));
+  markers.push({
+    time: a.oos_start_tv, position: "aboveBar", color: "#e0b44a",
+    shape: "arrowDown", text: "HOLDOUT / OOS",
+  });
+  markers.sort((x, y) => (x.time > y.time) - (x.time < y.time));
+  candlesSeries.setMarkers(markers);
+  addBandStrip(priceChart, candles, a);
+
+  const closeLayer = document.createElement("div");
+  closeLayer.className = "close-layer";
+  priceEl.appendChild(closeLayer);
+  let paintQueued = false;
+  const paintCloses = () => {
+    if (paintQueued) return;
+    paintQueued = true;
+    requestAnimationFrame(() => {
+      paintQueued = false;
+      if (!priceChart) return;
+      paintCloseTriangles(priceChart, candlesSeries, candles, a.trades, closeLayer);
+    });
+  };
+  paintCloses();
+  priceChart.timeScale().subscribeVisibleLogicalRangeChange(paintCloses);
+  unbindSelect.push(() => {
+    try { priceChart.timeScale().unsubscribeVisibleLogicalRangeChange(paintCloses); } catch (_) {}
+  });
+
+  const eqSeries = equityChart.addAreaSeries({
+    lineColor: "#5b8dd9",
+    topColor: "rgba(91,141,217,.28)",
+    bottomColor: "rgba(91,141,217,0)",
+    lineWidth: 2,
+  });
+  eqSeries.setData(a.equity.map(p => ({time: p.time, value: p.value})));
+  addBandStrip(equityChart, a.equity, a);
+
+  priceChart.timeScale().fitContent();
+  equityChart.timeScale().fitContent();
+
+  let syncing = false;
+  const follow = (source, target) => {
+    source.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if (!range || syncing) return;
+      syncing = true;
+      target.timeScale().setVisibleLogicalRange(range);
+      syncing = false;
+    });
+  };
+  follow(priceChart, equityChart);
+  follow(equityChart, priceChart);
+  unbindSelect.push(bindRangeSelect(priceChart, priceEl));
+  unbindSelect.push(bindRangeSelect(equityChart, equityEl));
+}
+
+document.getElementById("run").onclick = () => run("full");
+function resetWindow() {
+  dragStart = dragEnd = null;
+  startEl.value = "";
+  endEl.value = "";
+  run("full");
+}
+document.querySelectorAll(".chart-legend .reset:not(.sel-window)").forEach(btn => {
+  btn.onclick = resetWindow;
+});
+document.querySelectorAll(".sel-window").forEach(btn => {
+  btn.addEventListener("click", () => setSelectWindow(!selectWindow));
+});
+document.getElementById("recalc").onclick = () => {
+  dragStart = dragEnd = null;
+  run("window");
+};
+function onToggle(ev) {
+  if (!selectedSegments().length) {
+    ev.target.checked = true;
+    syncLegendButtons();
+    setStatus("Leave in-sample, holdout, or both on.", true);
+    return;
+  }
+  syncLegendButtons();
+  run("toggle");
+}
+document.getElementById("tog-is").onchange = onToggle;
+document.getElementById("tog-oos").onchange = onToggle;
+document.querySelectorAll(".chart-legend .item.tog").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const box = document.getElementById(btn.dataset.seg === "is" ? "tog-is" : "tog-oos");
+    box.checked = !box.checked;
+    box.dispatchEvent(new Event("change"));
+  });
+});
+symbolSel.onchange = () => {
+  fillTimeframes();
+  run("full");
+};
+tfSel.onchange = () => run("full");
+ideaSel.onchange = () => run("full");
+document.addEventListener("DOMContentLoaded", async () => {
+  await loadCatalog();
+  syncLegendButtons();
+  run("full");
+});
+</script>
+</body>
+</html>

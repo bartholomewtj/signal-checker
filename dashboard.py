@@ -11,8 +11,8 @@ the strategy's position right now, and the honesty-test verdicts from
 the reports. "Update data" pulls only the newest candles from the
 exchange, so refreshing is quick.
 
-No new dependencies: Python's built-in web server plus one charting
-library loaded by the browser (TradingView's lightweight-charts).
+No new dependencies: Python's built-in web server plus the vendored
+TradingView Lightweight Charts file in vendor/.
 """
 
 import json
@@ -172,6 +172,12 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/":
                 with open(os.path.join(HERE, "dashboard.html"), "rb") as fh:
                     self._send(fh.read(), "text/html; charset=utf-8")
+            elif url.path == "/lightweight-charts.js":
+                js = os.path.join(
+                    HERE, "vendor", "lightweight-charts.standalone.production.js"
+                )
+                with open(js, "rb") as fh:
+                    self._send(fh.read(), "application/javascript")
             elif url.path == "/api/meta":
                 self._send({"strategies": sorted(REGISTRY),
                             "symbols": SYMBOLS, "timeframes": TIMEFRAMES,

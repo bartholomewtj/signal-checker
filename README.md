@@ -1,100 +1,90 @@
 # signal-check
 
-A small, honest backtesting pipeline. You give it a trading signal; it tells
-you whether the signal's performance looks real or looks like luck.
+Honest backtests for trading ideas. You give it a rule. It tells you
+whether the backtest looks real or looks like luck. Most ideas fail.
+That is the product working.
 
-Most backtests lie by accident: they test on the same data the idea was tuned
-on, they ignore costs, and they never ask "would random noise have scored
-this well?" This pipeline asks exactly that.
+This is the one trading-validation project. The old `algoideas` spec and
+the `grok-trading-test` prototype have been absorbed here.
 
 ## How to run it
 
+From `C:\ClaudeOS\Projects\signalchecker`:
+
 ```
-pip install -r requirements.txt
-python data.py      # downloads ~9 years of Bitcoin 12-hour candles (once)
-python check.py     # full check, roughly 10 minutes
-python check.py --quick   # rough answer in about a minute
+uv run --with-requirements requirements.txt python check.py --strategy devma --timeframe 12h
+uv run --with pytest --with-requirements requirements.txt pytest -q tests
 ```
 
-The result prints to the screen and is saved to
-`report_<strategy>_<timeframe>.txt`. It ends with a verdict: **LOOKS REAL**,
-**NOT PROVEN**, or **NO EDGE FOUND**.
+`--quick` is a rough answer in about a minute. A full run is tens of minutes
+(defaults: 200 in-sample shuffles + 100 walk-forward).
 
-## What it actually does
-
-Four stages, each one harder to fool than the last:
-
-1. **Full backtest.** Runs the strategy over all the data with realistic
-   costs (0.15% commission per side plus 0.05% slippage, fills at the next
-   bar's open, no leverage). This is the flattering number — it proves
-   nothing by itself.
-
-2. **In-sample honesty test.** Shuffles the price history into hundreds of
-   fake-but-statistically-identical versions (same daily moves, random
-   order — a *Monte Carlo permutation test*), and re-tunes the strategy on
-   each one. If tuned-on-noise scores as well as tuned-on-reality, the
-   backtest number was just curve-fitting.
-
-3. **Walk-forward.** Repeatedly picks the best settings using only past
-   data, then trades the *next* six months blind, and stitches the blind
-   segments together. This is the closest a backtest gets to "what would I
-   actually have earned."
-
-4. **Walk-forward honesty test.** The shuffle test applied to the whole
-   walk-forward process. Hardest test in the pipeline.
-
-The verdict requires: money made out of sample, a decent number of trades,
-and both shuffle tests showing the real data beats noise (p < 0.05).
-
-## The signal under test
-
-`strategies.py` holds 8 strategies, each with its own parameter grid. One is
-"sweep reversal" (`DiamondHands`), a stop-run pattern ported from an old
-TradingView Pine Script: price dips below the recent low but closes back
-above it, while the longer trend agrees. The other seven are variations on
-trend-following and breakout ideas.
-
-All 8 were run through the pipeline above, across multiple assets and
-timeframes. See `ANALYSIS.md` for the per-strategy results and `ROBUSTNESS.md`
-for how they hold up out of sample and on other markets.
-
-## Dashboard
+Dashboard:
 
 ```
 python dashboard.py
 ```
 
-Opens a live dashboard at http://localhost:8787: pick any strategy,
-asset and timeframe; see the price chart with every trade marked, the
-equity curve, headline stats, what position the strategy holds right
-now, and the honesty-test verdicts. "Update data" pulls just the newest
-candles from the exchange; the auto-refresh checkbox re-runs every
-minute.
+http://localhost:8787. Pick a strategy, asset, and timeframe. Charts use the
+vendored Lightweight Charts file (no CDN).
+
+Turn a named idea into a spec (no LLM):
+
+```
+python refine.py questions --idea "devma on bitcoin"
+python refine.py spec --idea "devma on bitcoin" --answers answers.json
+```
+
+That prints `{"strategy": "devma", "symbol": "BTC/USDT", ...}`. It does not
+run the backtest and it does not write `trials.csv`.
+
+Do **not** run `check.py --holdout` for DEVMA again. That one look is taken
+(`holdout_devma_12h.txt`). A second look burns the reserved year.
+
+## What a run does
+
+Four stages, each harder to fool than the last (`check.py`):
+
+1. **Full backtest** with costs (0.15% commission + 0.05% slippage per side,
+   next-bar-open fills, 1 bp / 8h funding on shorts).
+2. **In-sample honesty** — re-tune on hundreds of shuffled bar histories
+   (Masters permutation). If noise scores as well as reality, it was luck.
+3. **Walk-forward** — pick settings on the past, trade the next six months
+   blind, stitch the blind segments.
+4. **Walk-forward honesty** — the shuffle test on the whole walk-forward.
+
+Verdict: **LOOKS REAL**, **NOT PROVEN**, or **NO EDGE FOUND**. It needs money
+made out of sample, enough trades, and both shuffle tests beating noise
+(raw p < 0.05). `trials.csv` is the append-only ledger. The live bar is
+Bonferroni: `0.05 / N` where N is distinct `(strategy, timeframe)` pairs
+with `mode=full`. Today N = 5, bar = 0.0100.
+
+The last 12 calendar months are a reserved hold-out (`data.split_holdout`).
+Stages 1–4 never see them.
+
+## What survived
+
+DEVMA on 12h BTC/USDT is the only LOOKS REAL under the honest rules, and
+only at the raw 0.05 bar (provisional vs Bonferroni 0.0100). Its one-shot
+hold-out used `{vol_ma: 20, vol_run: 8}`, both sides. **Do not re-tune
+DEVMA off that number.** `combo` is a documented negative — do not "fix" it.
+
+See `ANALYSIS.md` and `ROBUSTNESS.md`. The unification plan and next slices
+(forward-test logger, dashboard honesty, CPCV/DSR later) are in
+`docs/UNIFIED-ROADMAP.md`. The deferred v4 spec is `docs/algoideas-v4-spec.md`.
 
 ## Files
 
-- `data.py` — downloads and caches price candles (Binance via ccxt)
-- `strategies.py` — the 8 strategies being tested, each with its parameter grid
-- `permute.py` — builds the shuffled price series for the honesty tests
-- `check.py` — runs the four stages and prints the verdict, saving
-  `report_<strategy>_<timeframe>.txt`
-- `robustness.py` / `robustness_devma.py` — re-run the pipeline across
-  multiple assets and timeframes to check a strategy isn't a one-market fluke
-- `assets_devma.py` / `equities_devma.py` — extend that robustness check to
-  more crypto assets and to equities/gold
+- `check.py` — four stages, verdict, `trials.csv`
+- `strategies.py` — eight named ideas (`REGISTRY`)
+- `data.py` — Binance via ccxt, Yahoo for ETFs
+- `permute.py` — Masters bar-permutation
+- `dashboard.py` / `dashboard.html` — local UI
+- `refine.py` — named idea → spec
+- `docs/UNIFIED-ROADMAP.md` — one-project plan
+- `vendor/lightweight-charts.standalone.production.js` — chart library
 
-## Credit where due
+## Credit
 
 - Backtest engine: [backtesting.py](https://github.com/kernc/backtesting.py)
-  (handles fills, costs and accounting so those aren't my bugs)
-- Permutation method: Timothy Masters' bar-permutation test, as implemented
-  by [neurotrader888/mcpt](https://github.com/neurotrader888/mcpt)
-
-## Honest limitations
-
-- Tested across 8 crypto majors, four timeframes (1h/4h/12h/1d), and a
-  handful of equities and gold — but that's still a small slice of markets a
-  real edge would need to survive.
-- Slippage is a flat estimate; live trading is messier.
-- Passing all four stages still isn't proof. Markets change. It just means
-  the idea earned the right to be paper-traded.
+- Permutation: Timothy Masters, via [neurotrader888/mcpt](https://github.com/neurotrader888/mcpt)
