@@ -1,23 +1,44 @@
 # signal-check
 
-Honest backtests for trading ideas. You give it a rule. It tells you
-whether the backtest looks real or looks like luck. Most ideas fail.
-That is the product working.
+Honest backtests for trading ideas. You describe a rule. An agent turns
+it into a Strategy class. The pipeline tells you whether the backtest
+looks real or looks like luck. Most ideas fail. That is the product
+working.
 
-This is the one trading-validation project. The old `algoideas` spec and
-the `grok-trading-test` prototype have been absorbed here.
+## How an idea gets tested
+
+```
+you describe the idea
+        ↓
+agent asks clarifying questions, then writes a class in strategies.py
+        ↓
+pytest -q tests          (lookahead runs automatically)
+        ↓
+check.py --strategy X --timeframe T --quick
+        (verdict on screen, not logged)
+        ↓
+you read it. if you want it on the ledger:
+check.py --strategy X --timeframe T
+        (full shuffles, appends mode=full, N goes up)
+```
+
+New idea: read `ADDING-AN-IDEA.md`. The agent must ask you questions
+before writing any class. Do not run a full `check.py` unless you say
+to log it.
 
 ## How to run it
 
 From `C:\ClaudeOS\Projects\signalchecker`:
 
 ```
-uv run --with-requirements requirements.txt python check.py --strategy devma --timeframe 12h
 uv run --with pytest --with-requirements requirements.txt pytest -q tests
+uv run --with-requirements requirements.txt python check.py --strategy devma --timeframe 12h --quick
+uv run --with-requirements requirements.txt python ledger.py status
 ```
 
-`--quick` is a rough answer in about a minute. A full run is tens of minutes
-(defaults: 200 in-sample shuffles + 100 walk-forward).
+`--quick` / `--preview` is a rough answer in about a minute and does
+**not** write `trials.csv`. A full run is tens of minutes (200 in-sample
+shuffles + 100 walk-forward) and **is** a logged trial.
 
 Dashboard:
 
@@ -25,21 +46,21 @@ Dashboard:
 python dashboard.py
 ```
 
-http://localhost:8787. Pick a strategy, asset, and timeframe. Charts use the
-vendored Lightweight Charts file (no CDN).
+http://localhost:8787. Charts use the vendored Lightweight Charts file
+(no CDN). Dashboard runs are not ledger rows.
 
-Turn a named idea into a spec (no LLM):
+Named idea already in the registry (no LLM):
 
 ```
 python refine.py questions --idea "devma on bitcoin"
 python refine.py spec --idea "devma on bitcoin" --answers answers.json
 ```
 
-That prints `{"strategy": "devma", "symbol": "BTC/USDT", ...}`. It does not
-run the backtest and it does not write `trials.csv`.
+That prints a spec. It does not run the backtest and it does not write
+`trials.csv`.
 
-Do **not** run `check.py --holdout` for DEVMA again. That one look is taken
-(`holdout_devma_12h.txt`). A second look burns the reserved year.
+A `--holdout` look is once per `(strategy, timeframe)`. A second look is
+refused unless you pass `--i-know-this-burns-the-holdout`.
 
 ## What a run does
 
@@ -57,31 +78,33 @@ Verdict: **LOOKS REAL**, **NOT PROVEN**, or **NO EDGE FOUND**. It needs money
 made out of sample, enough trades, and both shuffle tests beating noise
 (raw p < 0.05). `trials.csv` is the append-only ledger. The live bar is
 Bonferroni: `0.05 / N` where N is distinct `(strategy, timeframe)` pairs
-with `mode=full`. Today N = 5, bar = 0.0100.
+with `mode=full`. Today N = 5, bar = 0.0100. Each new pair on a full run
+raises N.
 
 The last 12 calendar months are a reserved hold-out (`data.split_holdout`).
 Stages 1–4 never see them.
 
-## What survived
+Crypto refreshes pin Binance, drop the unclosed current bar, and append
+new closed timestamps only.
 
-DEVMA on 12h BTC/USDT is the only LOOKS REAL under the honest rules, and
-only at the raw 0.05 bar (provisional vs Bonferroni 0.0100). Its one-shot
-hold-out used `{vol_ma: 20, vol_run: 8}`, both sides. **Do not re-tune
-DEVMA off that number.** `combo` is a documented negative — do not "fix" it.
+## Existing examples
 
-See `ANALYSIS.md` and `ROBUSTNESS.md`. The unification plan and next slices
-(forward-test logger, dashboard honesty, CPCV/DSR later) are in
-`docs/UNIFIED-ROADMAP.md`. The deferred v4 spec is `docs/algoideas-v4-spec.md`.
+The eight registry classes are examples the pipeline already judged.
+`combo` is a documented negative — do not "fix" it. Historical write-up:
+`ANALYSIS.md` and `ROBUSTNESS.md`. Later honesty upgrades (CPCV / DSR)
+are in `docs/UNIFIED-ROADMAP.md`.
 
 ## Files
 
+- `ADDING-AN-IDEA.md` — contract for a new idea
 - `check.py` — four stages, verdict, `trials.csv`
-- `strategies.py` — eight named ideas (`REGISTRY`)
+- `strategies.py` — named ideas (`REGISTRY`) plus an unregistered template
 - `data.py` — Binance via ccxt, Yahoo for ETFs
 - `permute.py` — Masters bar-permutation
+- `ledger.py` — `status` / `list`
 - `dashboard.py` / `dashboard.html` — local UI
 - `refine.py` — named idea → spec
-- `docs/UNIFIED-ROADMAP.md` — one-project plan
+- `docs/UNIFIED-ROADMAP.md` — longer plan
 - `vendor/lightweight-charts.standalone.production.js` — chart library
 
 ## Credit

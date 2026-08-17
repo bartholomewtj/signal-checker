@@ -569,3 +569,31 @@ REGISTRY = {
     "devma": Devma,
     "combo": Combo,
 }
+
+
+# ---------------------------------------------------------------------------
+# Template for a new idea. Copy, rename, fill, then add to REGISTRY.
+# Not registered — do not run check.py on this class.
+# See ADDING-AN-IDEA.md.
+
+
+class NewIdea(Base):
+    """Copy, rename, fill init/next, then add the new name to REGISTRY."""
+    period = 20
+    GRID = {"period": [10, 20, 40]}
+    WARMUP = 50
+
+    def init(self):
+        close = self.data.Close.s
+        self.ma = self.I(lambda: close.rolling(self.period).mean(), plot=False)
+
+    def next(self):
+        if np.isnan(self.ma[-1]):
+            return
+        close = self.data.Close[-1]
+        if close > self.ma[-1] and not self.position.is_long:
+            self.position.close()
+            self.buy()
+        elif close < self.ma[-1] and not self.position.is_short:
+            self.position.close()
+            self.sell()

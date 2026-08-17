@@ -1,49 +1,43 @@
 # Next session
 
-_Last handoff: 2026-08-17 — branch `main`_
+_Last handoff: 2026-08-17 — branch `idea-factory` (open this PR)_
 
 ## Where this stopped
 
-One project: `signalchecker` (PR #11 merged). The `algoideas` and
-`grok-trading-test` folders are gone. Plan: `docs/UNIFIED-ROADMAP.md`.
-Nothing is uncommitted. Next build is Phase A: data hygiene + DEVMA 12h
-`forward.py`. Do not re-tune DEVMA.
+The product is the idea-testing factory, not a specific strategy.
+DEVMA forward-test (old Phase A / issue #1) is parked.
+
+Intake: you describe an idea → agent asks clarifying questions
+(`ask_user_question`) → writes a Strategy class → `--quick` (not logged)
+→ you decide whether to log a full run.
 
 ## Resume with
 
 ```
 cd C:\ClaudeOS\Projects\signalchecker
 uv run --with pytest --with-requirements requirements.txt pytest -q tests
+uv run --with-requirements requirements.txt python ledger.py status
 ```
-
-62 tests, ~7s. Dashboard:
-`"C:\Users\barth\AppData\Local\Python\pythoncore-3.14-64\python.exe" dashboard.py`
-→ http://localhost:8787
 
 ## Next thing to do
 
-1. Issue #1 / Phase A — `forward.py` + pin Binance + drop unclosed bars.
-   Build ticket: `docs/UNIFIED-ROADMAP.md` Appendix C. 12h, both sides,
-   `{vol_ma: 20, vol_run: 8}`. Not the stale daily long-only issue text.
-2. Phase B — dashboard shows Bonferroni bar, Sharpe, direction, buy-and-hold.
-   Pin `devma`+`12h` to 20/8. Partial issue #2. No sliders, no blend.
-3. Phase C — shade the reserved 12 months on :8787; drag-recalculate
-   must not write `trials.csv`. Reference: `docs/archive/grok-panel.html`.
+1. Merge this PR if it is still open.
+2. Bring a new idea. Agent follows `ADDING-AN-IDEA.md` — questions first,
+   then a class, then `--quick` only.
+3. Later, not now: dashboard reads `trials.csv` generally (no strategy
+   pins). Generic paper-trade logger only after some idea earns LOOKS REAL.
 
 ## Open
 
-- No PRs.
-- Issues: #1 DEVMA 12h forward-test (headline) · #2 dashboard honesty
-  fields (not the old grid/blend) · #3 killzone (parked ~3 months) ·
-  #6 `adw_rerun.py` (only if a long check.py run is scheduled)
+- No strategy-specific work.
+- Issues: #1 DEVMA forward-test **parked** · #2 dashboard honesty
+  (still no sliders/blend) · #3 killzone parked · #6 `adw_rerun.py`
+  only if a long check.py is scheduled.
 
 ## Watch out for
 
-- **Do not re-tune DEVMA** off `holdout_devma_12h.txt`. One look, taken.
-- Do not run `check.py --holdout` for DEVMA again (no code guard yet —
-  that lands in Phase A).
-- `trials.csv` is append-only. Freeze new `mode=full` pairs until Phase G
-  unless you open a PR that names the new hypothesis.
-- `combo` stays a negative result. Don't fix it.
+- Do not run a full `check.py` unless asked to log it. `--quick` does
+  not write `trials.csv`.
+- Do not re-tune existing examples off hold-out numbers.
+- `combo` stays a negative result.
 - Plain `python` lacks pandas. Use `uv run --with-requirements requirements.txt`.
-- `just obs` → localhost:4600 for the factory trace UI (needs bun).

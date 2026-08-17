@@ -184,27 +184,67 @@ def optimize(df, strat):
     return best_params, best_score
 
 
-def append_trial(row):
+def is_preview(args):
+    """--quick and --preview are display-only. They must not write the ledger."""
+    return bool(getattr(args, "quick", False) or getattr(args, "preview", False))
+
+
+def append_trial(row, path=None):
     """Add one line to trials.csv, writing the header if the file is new."""
-    is_new = not os.path.exists(LEDGER)
-    with open(LEDGER, "a", newline="") as fh:
+    path = path or LEDGER
+    is_new = not os.path.exists(path)
+    with open(path, "a", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=LEDGER_COLUMNS)
         if is_new:
             writer.writeheader()
         writer.writerow(row)
 
 
-def count_trials():
+def _iter_rows(path=None):
+    path = path or LEDGER
+    if not os.path.exists(path):
+        return
+    with open(path, newline="") as fh:
+        yield from csv.DictReader(fh)
+
+
+def count_trials(path=None):
     """Distinct strategy-timeframe pairs ever recorded, counting mode=full
     rows only. Hold-out looks are not selection trials."""
-    if not os.path.exists(LEDGER):
-        return 0
     pairs = set()
-    with open(LEDGER, newline="") as fh:
-        for row in csv.DictReader(fh):
-            if row.get("mode") == "full":
-                pairs.add((row.get("strategy"), row.get("timeframe")))
+    for row in _iter_rows(path):
+        if row.get("mode") == "full":
+            pairs.add((row.get("strategy"), row.get("timeframe")))
     return len(pairs)
+
+
+def pair_is_recorded(strategy, timeframe, path=None):
+    """True if this pair already has a mode=full row."""
+    for row in _iter_rows(path):
+        if (row.get("mode") == "full"
+                and row.get("strategy") == strategy
+                and row.get("timeframe") == timeframe):
+            return True
+    return False
+
+
+def has_holdout(strategy, timeframe, path=None):
+    """True if this pair already has a mode=holdout row."""
+    for row in _iter_rows(path):
+        if (row.get("mode") == "holdout"
+                and row.get("strategy") == strategy
+                and row.get("timeframe") == timeframe):
+            return True
+    return False
+
+
+def trial_announcement(strategy, timeframe, path=None):
+    """(n_now, n_after, bar, is_new_pair) for a forthcoming full run."""
+    n_now = count_trials(path)
+    is_new = not pair_is_recorded(strategy, timeframe, path)
+    n_after = n_now + (1 if is_new else 0)
+    bar = 0.05 / n_after if n_after else 0.05
+    return n_now, n_after, bar, is_new
 
 
 def walkforward(df, strat, train_bars, test_bars):
@@ -282,7 +322,10 @@ def main():
                     choices=sorted(REGISTRY))
     ap.add_argument("--timeframe", default="12h")
     ap.add_argument("--since", default="2017-09-01")
-    ap.add_argument("--quick", action="store_true", help="fewer shuffles")
+    ap.add_argument("--quick", action="store_true",
+                    help="fewer shuffles; display only, not logged")
+    ap.add_argument("--preview", action="store_true",
+                    help="same as --quick: fewer shuffles, not logged")
     ap.add_argument("--insample-perms", type=int, default=None)
     ap.add_argument("--wf-perms", type=int, default=None)
     ap.add_argument("--train-bars", type=int, default=1460,  # 2 years of 12h
@@ -294,7 +337,12 @@ def main():
                     help="restrict which side may open (default: both)")
     ap.add_argument("--holdout", action="store_true",
                     help="run once on the reserved hold-out period and stop")
+    ap.add_argument("--i-know-this-burns-the-holdout", action="store_true",
+                    dest="burn_holdout",
+                    help="allow a second --holdout for a pair that already has one")
     args = ap.parse_args()
+    if args.preview:
+        args.quick = True
 
     strat = REGISTRY[args.strategy]
     strat.direction = args.direction
@@ -330,6 +378,15 @@ def main():
             f"(hold-out, untouched)")
     else:
         say("Reserved:      none - dataset is shorter than 12 months")
+    if is_preview(args):
+        say("DISPLAY ONLY — not logged in trials.csv")
+    else:
+        n_now, n_after, bar, is_new = trial_announcement(
+            args.strategy, args.timeframe)
+        pair_note = ("new pair, N becomes "
+                     if is_new else "same pair, N stays ")
+        say(f"Logged trial:  N={n_now} now; {pair_note}{n_after}; "
+            f"bar={bar:.4f} (0.05 / {n_after})")
     say()
 
     # ---- Stage 1: full backtest with default parameters ----
@@ -412,6 +469,11 @@ def main():
         say("  NO EDGE FOUND. The backtest result is consistent with luck.")
 
     # ---- Multiple-testing ledger ----
+    if is_preview(args):
+        say()
+        say("  DISPLAY ONLY — not logged in trials.csv")
+        return
+
     append_trial({
         "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
         "mode": "full",
@@ -453,6 +515,16 @@ def main():
 def run_holdout(args, strat, full_df, work_df, holdout_df, direction_label):
     """Run once on the reserved hold-out period using the walk-forward's
     last chosen parameters, and report that result alone."""
+    if has_holdout(args.strategy, args.timeframe) and not getattr(
+            args, "burn_holdout", False):
+        print(
+            f"Refused: {args.strategy}/{args.timeframe} already has a "
+            f"mode=holdout row in trials.csv. A second look burns the "
+            f"reserved year. Pass --i-know-this-burns-the-holdout to override.",
+            flush=True,
+        )
+        raise SystemExit(2)
+
     lines = [f"Strategy: {args.strategy}", f"Direction mode: {direction_label}"]
     def say(msg=""):
         print(msg, flush=True)

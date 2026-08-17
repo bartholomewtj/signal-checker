@@ -5,11 +5,13 @@
 | Title | One project from algoideas + signalchecker + grok-trading-test |
 | Author | Grok (for Bart) |
 | Date | 2026-08-17 |
-| Status | Active — unification merged (PR #11). Next slice is Phase A. |
+| Status | Active — idea factory is the live plan. Phase A (DEVMA `forward.py`) is parked. |
 | Home repo | `C:\ClaudeOS\Projects\signalchecker` → github.com/bartholomewtj/signal-checker |
 | Audience | Bart (implement one slice at a time) and a later agent (implement without re-reading the three folders) |
 
-Absorbed 2026-08-17 (PR #11): `docs/algoideas-v4-spec.md`, `refine.py`, vendored Lightweight Charts, `docs/archive/grok-panel.html`. The `algoideas` and `grok-trading-test` folders are deleted. Phase E (named-idea refine) is done. Phase A (`forward.py`) is not.
+**2026-08-17 override:** do not build DEVMA-specific `forward.py` or dashboard pins next. The product is the idea-testing factory (`ADDING-AN-IDEA.md` + `check.py`). A new idea enters as an agent-written Strategy class after clarifying questions. Phases G–I (CPCV / DSR / DSL) are unchanged and still later.
+
+Absorbed 2026-08-17 (PR #11): `docs/algoideas-v4-spec.md`, `refine.py`, vendored Lightweight Charts, `docs/archive/grok-panel.html`. The `algoideas` and `grok-trading-test` folders are deleted. Phase E (named-idea refine) is done. Phase A (`forward.py`) is parked.
 
 ---
 
