@@ -5,11 +5,11 @@
 | Title | One project from algoideas + signalchecker + grok-trading-test |
 | Author | Grok (for Bart) |
 | Date | 2026-08-17 |
-| Status | Draft |
+| Status | Active — unification merged (PR #11). Next slice is Phase A. |
 | Home repo | `C:\ClaudeOS\Projects\signalchecker` → github.com/bartholomewtj/signal-checker |
 | Audience | Bart (implement one slice at a time) and a later agent (implement without re-reading the three folders) |
 
-Absorbed 2026-08-17: `algoideas/pipeline-spec.md` is now `docs/algoideas-v4-spec.md`. The grok-trading-test panel is archived at `docs/archive/grok-panel.html`; Lightweight Charts is vendored. `refine.py` lives here. The `algoideas` and `grok-trading-test` folders are deleted after this lands.
+Absorbed 2026-08-17 (PR #11): `docs/algoideas-v4-spec.md`, `refine.py`, vendored Lightweight Charts, `docs/archive/grok-panel.html`. The `algoideas` and `grok-trading-test` folders are deleted. Phase E (named-idea refine) is done. Phase A (`forward.py`) is not.
 
 ---
 
