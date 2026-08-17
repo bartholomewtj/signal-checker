@@ -1,20 +1,17 @@
 # Next session
 
-_Last handoff: 2026-08-07 — branch `main`_
+_Last handoff: 2026-08-17 — branch `unify-one-project`_
 
 ## Where this stopped
 
-Big session. The claudeSSSF agent factory was installed (`adws/`, run jobs
-with `just sdlc "..."`), then used to make the pipeline statistically
-honest: a reserved 12-month hold-out, a `trials.csv` multiple-testing
-ledger with Bonferroni-corrected verdicts, trade-level profit factor with
-a 10-trade floor, funding costs on shorts plus a `--direction` flag, and a
-pytest suite with a lookahead tripwire. The three old LOOKS REAL verdicts
-were then re-earned under the new rules: **devma 12h survived** (and its
-one-shot hold-out look was excellent: +7.2% over a year where buy-and-hold
-lost 44.9%); devma 1d and diamond_hands 4h are now NOT PROVEN. All merged
-to main (PRs #4, #5). ANALYSIS.md "Reruns under the honest rules" has the
-full table.
+algoideas and grok-trading-test were absorbed into this repo and those
+folders were deleted. Living plan: `docs/UNIFIED-ROADMAP.md`. Next build
+slice is still **Phase A / PR 1**: data hygiene + DEVMA 12h `forward.py`
+(pinned `{vol_ma: 20, vol_run: 8}`, both sides). Do not re-tune DEVMA.
+
+Honest-rules history: **devma 12h survived** (hold-out +7.2% vs buy-and-hold
+−44.9%). devma 1d and diamond_hands 4h are NOT PROVEN. `combo` stays a
+negative result.
 
 ## Resume with
 
@@ -27,9 +24,9 @@ the full python path — see Watch out for)
 
 ## Next thing to do
 
-1. Issue #1 — forward-test DEVMA 12h: log its daily position from
-   dashboard.py so real out-of-sample evidence accumulates. The hold-out
-   pass makes this worth doing properly now.
+1. Issue #1 / Phase A — `forward.py` + pin Binance + drop unclosed bars.
+   Spec in `docs/UNIFIED-ROADMAP.md` Appendix C. Not daily long-only:
+   12h, both sides, params 20/8.
 2. Issue #6 — small `adw_rerun.py` with code phases for long check.py
    runs, so multi-hour backtests don't have to live inside an agent phase.
 3. Issue #2 — dashboard v2 (all-strategies grid); note the dashboard does
