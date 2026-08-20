@@ -121,8 +121,10 @@ traders close voluntarily. Judge results accordingly.
 
 ## Existing examples
 
-The eight registry classes are examples the pipeline already judged.
-`combo` is a documented negative — do not "fix" it. Historical write-up:
+The nine registry classes are examples the pipeline already judged.
+`combo` is a documented negative — do not "fix" it. `liq_flush` is the
+first idea to use data other than price; it has previews only, no logged
+trial. Historical write-up:
 `ANALYSIS.md` and `ROBUSTNESS.md`. Later honesty upgrades (CPCV / DSR)
 are in `docs/UNIFIED-ROADMAP.md`.
 
@@ -132,7 +134,7 @@ are in `docs/UNIFIED-ROADMAP.md`.
 - `check.py` — four stages, verdict, `trials.csv`
 - `strategies.py` — named ideas (`REGISTRY`) plus an unregistered template
 - `data.py` — Binance via ccxt, Yahoo for ETFs
-- `liqproxy.py` — daily BTC liquidation proxy from Binance open interest
+- `liqproxy.py` — hourly liquidation proxy from Binance open interest
 - `permute.py` — Masters bar-permutation
 - `ledger.py` — `status` / `list`
 - `dashboard.py` / `dashboard.html` — local UI
