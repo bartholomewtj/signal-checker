@@ -89,21 +89,35 @@ new closed timestamps only.
 
 ## Liquidation data
 
-`liqproxy.py` builds a daily BTC liquidation estimate, cached at
-`data/BTC-USDT_liqproxy_1d.csv`. Build or refresh it with `python
-liqproxy.py`.
+`liqproxy.py` builds a liquidation estimate for any of the crypto symbols,
+cached hourly at `data/<SYMBOL>_liqproxy_1h.csv`:
+
+```
+python liqproxy.py              # BTC/USDT
+python liqproxy.py ETH/USDT
+```
+
+Refreshes are append-only, the same as price bars: hours already cached
+are never re-fetched or rewritten.
 
 Real liquidation history is not free any more, so this estimates forced
 deleveraging from Binance open interest instead: open interest falling
 while price falls means longs are being flushed, falling while price rises
-means shorts are. It covers 2020-09 onward, which is when Binance starts
-publishing open interest.
+means shorts are. Coverage starts when Binance starts publishing open
+interest for the symbol - 2020-09 for BTC, 2021-12 for the rest.
+
+Hourly is the stored resolution because it divides evenly into 4h, 12h and
+1d, so the columns line up with the price bars of any run. A bar the cache
+cannot fully cover is dropped rather than half-counted.
 
 A strategy that sets `NEEDS_LIQ = True` gets `LongLiq` and `ShortLiq`
-columns attached by `check.py`, and the frame is trimmed to the days the
-proxy covers. `permute.py` shuffles those columns along with their bar, so
-the honesty tests destroy the signal the same way they destroy a price
-pattern.
+columns attached by `check.py` and by the dashboard, and the frame is
+trimmed to the bars the proxy covers. `permute.py` shuffles those columns
+along with their bar, so the honesty tests destroy the signal the same way
+they destroy a price pattern.
+
+It is a proxy, not a liquidation print - open interest also falls when
+traders close voluntarily. Judge results accordingly.
 
 ## Existing examples
 

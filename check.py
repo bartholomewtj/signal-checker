@@ -355,9 +355,10 @@ def main():
     full_df = data.load(timeframe=args.timeframe, since=args.since)
     if getattr(strat, "NEEDS_LIQ", False):
         # Strategy needs the liquidation proxy columns. This also trims the
-        # frame to the days the proxy covers (Binance open interest starts
-        # 2020-09), so the hold-out split below is taken on the short frame.
-        full_df = liqproxy.attach(full_df)
+        # frame to the bars the proxy covers (Binance open interest starts
+        # 2020-09 for BTC), so the hold-out split below is taken on the
+        # short frame.
+        full_df = liqproxy.attach(full_df, timeframe=args.timeframe)
     work_df, holdout_df = data.split_holdout(full_df)
 
     if args.holdout:
