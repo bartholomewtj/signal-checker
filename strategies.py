@@ -52,6 +52,20 @@ def anchored_sma(values, events, n=1):
     return out
 
 
+def outlier_z(series, n):
+    """How far today sits above its recent normal, in standard deviations.
+
+    The yardstick is measured on the `n` days ending *yesterday*
+    (`.shift(1)`), so a huge day is not allowed to inflate the average and
+    spread it is being judged against. Without that shift a single spike
+    partly hides itself.
+    """
+    prior = series.shift(1)
+    mu = prior.rolling(n).mean()
+    sd = prior.rolling(n).std()
+    return (series - mu) / sd.where(sd > 0)
+
+
 def sticky_state(series):
     """+1 while the series was last rising, -1 while last falling.
 
@@ -559,6 +573,66 @@ class Combo(Devma):
         self.sig_short = self.I(lambda: f(short_all), plot=False)
 
 
+# ---------------------------------------------------------------------------
+# 9. Liquidation Flush - outlier forced-deleveraging day as a regime turn
+
+class LiqFlush(Base):
+    """An outlier liquidation day marks a turn, and the turn is traded with it.
+
+    A day where the long-liquidation reading spikes far above its recent
+    normal is read as the market having turned down, so it is SOLD. A
+    short-side spike is read as a turn up, so it is BOUGHT. This is the
+    continuation reading, not the capitulation-reversal one: the claim is
+    that a big flush starts an extended move rather than ending one.
+
+    Needs the LongLiq/ShortLiq columns from `liqproxy.py`, which estimates
+    forced deleveraging from Binance open interest. `NEEDS_LIQ` tells
+    check.py to attach them.
+
+    Exit is purely time-based: hold `hold` bars, then flatten. No stop, no
+    target - the point is to measure the move that follows the flush, not
+    to dress it up with extra tuned numbers.
+    """
+    lookback = 90
+    z = 2.5
+    hold = 20
+
+    GRID = {"lookback": [30, 90], "z": [2.5, 3.5], "hold": [10, 20, 40]}
+    WARMUP = 121
+    NEEDS_LIQ = True
+
+    def init(self):
+        longs, shorts = self.data.LongLiq.s, self.data.ShortLiq.s
+        n = self.lookback
+        self.z_long = self.I(lambda: outlier_z(longs, n), plot=False)
+        self.z_short = self.I(lambda: outlier_z(shorts, n), plot=False)
+
+    def next(self):
+        z_long, z_short = self.z_long[-1], self.z_short[-1]
+        if np.isnan(z_long) or np.isnan(z_short):
+            return
+
+        # Time exit first, so a finished trade can be replaced on the same bar.
+        if self.trades:
+            held = len(self.data) - 1 - self.trades[-1].entry_bar
+            if held >= self.hold:
+                self.position.close()
+
+        go_short = z_long >= self.z      # longs flushed -> market turned down
+        go_long = z_short >= self.z      # shorts flushed -> market turned up
+        if go_short and go_long:
+            # A violent day flushes both sides. The bigger outlier wins;
+            # a dead tie is skipped rather than guessed.
+            go_short, go_long = z_long > z_short, z_short > z_long
+
+        if go_short and not self.position.is_short:
+            self.position.close()
+            self.sell()
+        elif go_long and not self.position.is_long:
+            self.position.close()
+            self.buy()
+
+
 REGISTRY = {
     "diamond_hands": DiamondHands,
     "trend_step": TrendStep,
@@ -568,6 +642,7 @@ REGISTRY = {
     "vwap_rejection": VWAPRejection,
     "devma": Devma,
     "combo": Combo,
+    "liq_flush": LiqFlush,
 }
 
 

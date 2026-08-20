@@ -87,6 +87,24 @@ Stages 1–4 never see them.
 Crypto refreshes pin Binance, drop the unclosed current bar, and append
 new closed timestamps only.
 
+## Liquidation data
+
+`liqproxy.py` builds a daily BTC liquidation estimate, cached at
+`data/BTC-USDT_liqproxy_1d.csv`. Build or refresh it with `python
+liqproxy.py`.
+
+Real liquidation history is not free any more, so this estimates forced
+deleveraging from Binance open interest instead: open interest falling
+while price falls means longs are being flushed, falling while price rises
+means shorts are. It covers 2020-09 onward, which is when Binance starts
+publishing open interest.
+
+A strategy that sets `NEEDS_LIQ = True` gets `LongLiq` and `ShortLiq`
+columns attached by `check.py`, and the frame is trimmed to the days the
+proxy covers. `permute.py` shuffles those columns along with their bar, so
+the honesty tests destroy the signal the same way they destroy a price
+pattern.
+
 ## Existing examples
 
 The eight registry classes are examples the pipeline already judged.
@@ -100,6 +118,7 @@ are in `docs/UNIFIED-ROADMAP.md`.
 - `check.py` — four stages, verdict, `trials.csv`
 - `strategies.py` — named ideas (`REGISTRY`) plus an unregistered template
 - `data.py` — Binance via ccxt, Yahoo for ETFs
+- `liqproxy.py` — daily BTC liquidation proxy from Binance open interest
 - `permute.py` — Masters bar-permutation
 - `ledger.py` — `status` / `list`
 - `dashboard.py` / `dashboard.html` — local UI

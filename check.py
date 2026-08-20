@@ -41,6 +41,7 @@ warnings.filterwarnings(
     "ignore", message=".*insufficient margin.*", category=UserWarning)
 
 import data
+import liqproxy
 from permute import permute_bars
 from strategies import REGISTRY
 
@@ -352,6 +353,11 @@ def main():
     n_wf = args.wf_perms or (10 if args.quick else 100)
 
     full_df = data.load(timeframe=args.timeframe, since=args.since)
+    if getattr(strat, "NEEDS_LIQ", False):
+        # Strategy needs the liquidation proxy columns. This also trims the
+        # frame to the days the proxy covers (Binance open interest starts
+        # 2020-09), so the hold-out split below is taken on the short frame.
+        full_df = liqproxy.attach(full_df)
     work_df, holdout_df = data.split_holdout(full_df)
 
     if args.holdout:
