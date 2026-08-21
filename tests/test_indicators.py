@@ -114,8 +114,6 @@ def test_rejection_bull_and_bear_and_touch_without_cross():
 #
 # Shared prefix: bar 3 is the peak (High=110), confirmed at bar 4, so the
 # swing-high level is 110 from bar 4 onward until a later swing confirms.
-# Default proximity 0.01 -> low must sit in [108.9, 111.1].
-# Default wick_ratio 0.4 -> lower wick at least 40% of the bar's range.
 
 
 def _ohlc(rows):
@@ -141,30 +139,26 @@ _PREFIX = (
     (106, 109, 105, 108),  # 9 close 108 <= 110
 )
 
-# Break of 110. Body through the level, not a long-wick retest.
+# Break of 110. High=116 is the take-profit for exit_mode=break_high.
 _BREAK = (108, 116, 107, 114)
 
-# Stays well above 110, no long wick near the level.
+# Stays well above 110, no wick into the level.
 _ABOVE = (114, 118, 112, 116)
 
-# Long lower wick, low 110.5 is 0.45% above 110 (inside the band, no tag).
-# range=3.0, lower wick=2.5, ratio=0.833. Close 113.2 > 110, bullish.
-_HAMMER_ABOVE = (113, 113.5, 110.5, 113.2)
-
-# Long lower wick, low 109.2 is 0.73% below 110 (through, still inside the band).
-# range=4.3, lower wick=3.8, ratio=0.884. Close 113.1 > 110, bullish.
-_HAMMER_THROUGH = (113, 113.5, 109.2, 113.1)
-
-# Tags 110 almost exactly, but the lower wick is short (ratio=0.216 < 0.4).
-_SHORT_PIERCE = (111.5, 115, 109.9, 114.5)
-
-# Long lower wick, low 120 is 9.1% above 110 (outside the band).
-_HAMMER_FAR = (124, 125, 120, 124.5)
+# Opens above 110, wicks through (low 109), closes back above.
+_RETEST = (112, 115, 109, 113)
 
 
-def test_break_retest_enters_on_later_hammer_not_on_the_break_bar():
-    rows = _PREFIX + (_BREAK, _ABOVE, _HAMMER_ABOVE, _ABOVE)
-    entry, armed = break_retest_long(*_ohlc(rows), window=5, close_mode="level")
+def test_break_retest_enters_on_later_rejection_not_on_the_break_bar():
+    # Bar 10 gaps up through 110 and wicks back into it - that is the
+    # break, and would look like a rejection if we allowed the break bar.
+    rows = _PREFIX + (
+        (112, 116, 109, 114),  # 10 break + wick; must not enter
+        _ABOVE,                # 11 no wick (low 112 > 110)
+        _RETEST,               # 12 retest
+        _ABOVE,
+    )
+    entry, armed, peak = break_retest_long(*_ohlc(rows), window=5)
     assert entry[10] == 0.0
     assert entry[12] == 1.0
     assert entry.sum() == 1.0
@@ -172,27 +166,16 @@ def test_break_retest_enters_on_later_hammer_not_on_the_break_bar():
     assert armed[11] == 110.0
     assert armed[12] == 110.0
     assert np.isnan(armed[13])
+    assert peak[12] == 116.0
 
 
-def test_break_retest_accepts_a_low_slightly_through_the_level():
-    rows = _PREFIX + (_BREAK, _HAMMER_THROUGH)
-    entry, armed = break_retest_long(*_ohlc(rows), window=5, close_mode="level")
-    assert entry[11] == 1.0
-    assert armed[11] == 110.0
-
-
-def test_break_retest_rejects_a_short_wick_even_if_it_tags_the_level():
-    rows = _PREFIX + (_BREAK, _SHORT_PIERCE)
-    entry, _ = break_retest_long(*_ohlc(rows), window=5, close_mode="level")
-    assert entry[11] == 0.0
-    assert entry.sum() == 0.0
-
-
-def test_break_retest_rejects_a_long_wick_far_from_the_level():
-    rows = _PREFIX + (_BREAK, _HAMMER_FAR)
-    entry, _ = break_retest_long(*_ohlc(rows), window=5, close_mode="level")
-    assert entry[11] == 0.0
-    assert entry.sum() == 0.0
+def test_break_retest_records_the_break_bar_high():
+    rows = _PREFIX + (_BREAK, _ABOVE, _RETEST, _ABOVE)
+    entry, _, peak = break_retest_long(*_ohlc(rows), window=5)
+    assert entry[12] == 1.0
+    assert peak[10] == 116.0
+    assert peak[12] == 116.0
+    assert np.isnan(peak[13])
 
 
 def test_break_retest_freezes_the_broken_level_not_a_newer_swing_high():
@@ -201,49 +184,21 @@ def test_break_retest_freezes_the_broken_level_not_a_newer_swing_high():
     rows = _PREFIX + (
         _BREAK,
         (114, 118, 112, 116),  # 11 peak 118
-        _HAMMER_ABOVE,         # 12 SH=118 confirms; hammer of frozen 110
+        _RETEST,               # 12 SH=118 confirms; retest of frozen 110
     )
-    entry, armed = break_retest_long(*_ohlc(rows), window=5, close_mode="level")
+    entry, armed, peak = break_retest_long(*_ohlc(rows), window=5)
     assert entry[12] == 1.0
     assert armed[12] == 110.0
-
-
-def test_break_retest_bullish_rejects_a_red_hammer():
-    # range=5.0, lower wick=2.1, ratio=0.42. Close 111.6 > 110 but < open.
-    red_hammer = (114, 114.5, 109.5, 111.6)
-    rows = _PREFIX + (_BREAK, red_hammer, _ABOVE)
-    o, h, l, c = _ohlc(rows)
-    level, _ = break_retest_long(o, h, l, c, window=5, close_mode="level")
-    bull, _ = break_retest_long(o, h, l, c, window=5, close_mode="bullish")
-    assert level[11] == 1.0
-    assert bull[11] == 0.0
-    assert bull.sum() == 0.0
-
-
-def test_break_retest_upper_half_uses_the_bar_midpoint():
-    # Both: range=5.0, low 109.5 near 110. Midpoint 112.
-    # below_mid lower wick=2.1, ratio=0.42, close 111.6 < 112.
-    # above_mid lower wick=2.5, ratio=0.50, close 113.2 > 112.
-    below_mid = (114, 114.5, 109.5, 111.6)
-    above_mid = (112, 114.5, 109.5, 113.2)
-    rows = _PREFIX + (_BREAK, below_mid, above_mid)
-    o, h, l, c = _ohlc(rows)
-    upper, _ = break_retest_long(o, h, l, c, window=5, close_mode="upper_half")
-    level, _ = break_retest_long(o, h, l, c, window=5, close_mode="level")
-    assert level[11] == 1.0
-    assert upper[11] == 0.0
-    assert upper[12] == 1.0
+    assert peak[12] == 116.0
 
 
 def test_break_retest_window_allows_bar_plus_5_not_plus_6():
-    # Break at 10, last legal retest is bar 15.
-    rows_ok = _PREFIX + (_BREAK,) + (_ABOVE,) * 4 + (_HAMMER_ABOVE,)
-    entry_ok, _ = break_retest_long(*_ohlc(rows_ok), window=5, close_mode="level")
+    rows_ok = _PREFIX + (_BREAK,) + (_ABOVE,) * 4 + (_RETEST,)
+    entry_ok, _, _ = break_retest_long(*_ohlc(rows_ok), window=5)
     assert entry_ok[15] == 1.0
 
-    rows_late = _PREFIX + (_BREAK,) + (_ABOVE,) * 5 + (_HAMMER_ABOVE,)
-    entry_late, armed_late = break_retest_long(
-        *_ohlc(rows_late), window=5, close_mode="level")
+    rows_late = _PREFIX + (_BREAK,) + (_ABOVE,) * 5 + (_RETEST,)
+    entry_late, armed_late, _ = break_retest_long(*_ohlc(rows_late), window=5)
     assert entry_late[16] == 0.0
     assert entry_late.sum() == 0.0
     assert np.isnan(armed_late[16])
@@ -253,17 +208,17 @@ def test_break_retest_close_back_below_the_level_disarms():
     rows = _PREFIX + (
         _BREAK,
         (114, 115, 108, 109),  # 11 close 109 < 110 -> fail
-        _HAMMER_ABOVE,
+        _RETEST,
     )
-    entry, armed = break_retest_long(*_ohlc(rows), window=5, close_mode="level")
+    entry, armed, _ = break_retest_long(*_ohlc(rows), window=5)
     assert entry.sum() == 0.0
     assert np.isnan(armed[11])
     assert np.isnan(armed[12])
 
 
 def test_break_retest_first_retest_consumes_the_setup():
-    rows = _PREFIX + (_BREAK, _HAMMER_ABOVE, _HAMMER_THROUGH)
-    entry, _ = break_retest_long(*_ohlc(rows), window=5, close_mode="level")
+    rows = _PREFIX + (_BREAK, _RETEST, _RETEST)
+    entry, _, _ = break_retest_long(*_ohlc(rows), window=5)
     assert entry[11] == 1.0
     assert entry[12] == 0.0
     assert entry.sum() == 1.0
