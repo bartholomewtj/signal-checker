@@ -109,7 +109,7 @@ class ReviewFinding(BaseModel):
 
     requirement: str                # the ask, in the requester's words
     met: bool
-    evidence: str = ""              # where it lives, or what is missing
+    evidence: str = ""              # met: "path/file.ext:LINE ..." or a command + its result; not met: what is missing
 
 
 class ReviewOutput(EnvelopeBase):
@@ -303,7 +303,7 @@ class PromptEngineering(BaseModel):
 
 class AgentConfig(BaseModel):
     name: str
-    coding_agent: Literal["pi", "claude_code"] = "claude_code"
+    coding_agent: Literal["pi", "claude_code", "grok", "agy"] = "claude_code"
     model: str = "sonnet"
     thinking: str = "medium"        # off | minimal | low | medium | high | xhigh | max
     color: str = ""                 # hex swatch for this agent's lane in the UI
@@ -323,7 +323,7 @@ class AgentConfig(BaseModel):
 
 
 class ConfigDefaults(BaseModel):
-    coding_agent: Literal["pi", "claude_code"] = "claude_code"
+    coding_agent: Literal["pi", "claude_code", "grok", "agy"] = "claude_code"
     model: str = "sonnet"
     thinking: str = "medium"
     color: str = ""
