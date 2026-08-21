@@ -39,6 +39,10 @@ ALIASES = {
     "vwap rejection": "vwap_rejection",
     "devma": "devma",
     "combo": "combo",
+    "liq flush": "liq_flush",
+    "liquidation flush": "liq_flush",
+    "break retest": "break_retest",
+    "swing retest": "break_retest",
 }
 
 QUESTION_TEMPLATE = (

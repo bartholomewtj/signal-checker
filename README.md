@@ -121,10 +121,10 @@ traders close voluntarily. Judge results accordingly.
 
 ## Existing examples
 
-The nine registry classes are examples the pipeline already judged.
-`combo` is a documented negative — do not "fix" it. `liq_flush` is the
-first idea to use data other than price; it has previews only, no logged
-trial. Historical write-up:
+The ten registry classes are examples the pipeline already judged.
+`combo` is a documented negative — do not "fix" it. `liq_flush` and
+`break_retest` have previews only, no logged trial; do not "fix"
+either into a pass. Historical write-up:
 `ANALYSIS.md` and `ROBUSTNESS.md`. Later honesty upgrades (CPCV / DSR)
 are in `docs/UNIFIED-ROADMAP.md`.
 
