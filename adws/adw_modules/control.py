@@ -11,6 +11,7 @@ import json
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 # ── exceptions ────────────────────────────────────────────────────────────
@@ -48,27 +49,40 @@ class BudgetExceeded(SystemExit):
 
 # --- Detection ---------------------------------------------------------
 #
-# WHAT WE ACTUALLY KNOW: nothing. No real rate-limit event from `claude -p
-# --output-format stream-json` has ever been captured for this project. That
-# capture was a Phase 1 deliverable that never happened, and it is recorded
-# here as a known gap rather than papered over.
+# Captured 15-17 Aug 2026 from Claude Code's terminal `result` event at a
+# weekly session limit (collie session 02af813c; issues #9 / #59). The shape:
 #
-# So detection is written by SHAPE, structured fields first, in the order
-# below. When a real event is finally seen, correct the table -- that is the
-# only edit needed, and `fleet/tests/test_rate_limit.py` will tell you if the
-# correction broke anything.
+#   {"is_error": true, "subtype": "success", "stop_reason": "stop_sequence",
+#    "terminal_reason": "api_error", "api_error_status": 429, "num_turns": 1,
+#    "total_cost_usd": 0,
+#    "result": "You've hit your session limit · resets 10:50am (Australia/Brisbane)"}
+#
+# The preceding assistant message carries `"error": "rate_limit"` as a STRING,
+# not a dict. Check 1 used to drop that (`isinstance(..., dict)` fell through
+# to {}). Check 4 used to read event["status"] / event["error"]["status"],
+# neither of which exists -- the 429 is at event["api_error_status"].
+# subtype is "success", so check 2 never fires.
+#
+# Before those two holes were closed, detection rode entirely on check 5
+# matching the English phrase "session limit". One wording change upstream
+# and it would miss silently again (and did, before 1854a7e, for eight runs).
+#
+# Structured fields first, in this order. Check 5 stays the backstop.
+# terminal_reason == "api_error" is corroborating, not a trigger on its own
+# (other API errors use it too).
 #
 # 1. event["error"]["type"]  in RATE_LIMIT_TYPES     (Anthropic API error shape)
+#    or event["error"] itself is a string in RATE_LIMIT_TYPES
 # 2. event["subtype"]        contains a RATE_LIMIT_MARKER
 # 3. event["error_type"]     in RATE_LIMIT_TYPES
-# 4. a 429 in event["status"] / event["error"]["status"]
+# 4. a 429 in event["status"] / event["error"]["status"] / event["api_error_status"]
 # 5. FALLBACK ONLY: RATE_LIMIT_MARKERS in the result text, lowercased.
 #
 # Anything else with is_error=true is an UpstreamError. Never a retry.
 
 RATE_LIMIT_TYPES = {"rate_limit_error", "rate_limit", "usage_limit_error"}
 RATE_LIMIT_MARKERS = ("rate limit", "rate_limit", "usage limit",
-                      "too many requests", "429")
+                      "session limit", "too many requests", "429")
 
 # Where a reset time might be, in the order we look. Values are read as:
 #   > 1_000_000_000  -> unix epoch seconds
@@ -100,16 +114,19 @@ def classify_result_event(event: dict) -> tuple[str, str]:
     says WHY it decided that.
     """
     event = event or {}
-    error = event.get("error") if isinstance(event.get("error"), dict) else {}
+    raw_error = event.get("error")
+    error = raw_error if isinstance(raw_error, dict) else {}
     is_error = bool(event.get("is_error"))
 
     if not is_error and not error:
         return "ok", ""
 
-    # 1. event["error"]["type"]
+    # 1. event["error"]["type"], or event["error"] as a string in the type set
     err_type = error.get("type")
     if err_type in RATE_LIMIT_TYPES:
         return "rate_limit", f"matched error.type={err_type!r}"
+    if isinstance(raw_error, str) and raw_error in RATE_LIMIT_TYPES:
+        return "rate_limit", f"matched error={raw_error!r}"
 
     # 2. event["subtype"] contains a marker
     subtype = str(event.get("subtype") or "")
@@ -122,10 +139,18 @@ def classify_result_event(event: dict) -> tuple[str, str]:
     if top_error_type in RATE_LIMIT_TYPES:
         return "rate_limit", f"matched error_type={top_error_type!r}"
 
-    # 4. a 429 in event["status"] / event["error"]["status"]
-    for status in (event.get("status"), error.get("status")):
+    # 4. a 429 in event["status"] / event["error"]["status"] / event["api_error_status"]
+    # terminal_reason == "api_error" corroborates, but never triggers on its own.
+    for status, origin in (
+        (event.get("status"), "status"),
+        (error.get("status"), "error.status"),
+        (event.get("api_error_status"), "api_error_status"),
+    ):
         if status is not None and str(status) == "429":
-            return "rate_limit", f"matched status=429"
+            detail = f"matched {origin}=429"
+            if event.get("terminal_reason") == "api_error":
+                detail += " (terminal_reason=api_error)"
+            return "rate_limit", detail
 
     # 5. FALLBACK ONLY: string match over result + subtype, lowercased.
     haystack = (str(event.get("result", "")) + " " + subtype).lower()
@@ -140,6 +165,88 @@ def classify_result_event(event: dict) -> tuple[str, str]:
         return "upstream", detail
 
     return "ok", ""
+
+
+# --- Capture ------------------------------------------------------------
+#
+# The session-limit shape above is now locked in. Capture stays: a new
+# wording or a new field still needs the whole event, and that used to
+# depend on a person noticing at the time and saving the tail of a
+# raw_output.jsonl under sessions/, which is gitignored and overwritten.
+#
+# So the run captures it itself. Both verdicts are written, and the second one
+# matters more: if the guessed table is WRONG, a real rate limit does not
+# arrive as "rate_limit" -- it arrives as "upstream", the bucket for terminal
+# errors we don't recognise. Capturing only the events we already classify
+# correctly would record exactly the evidence we don't need.
+#
+# The file sits beside sessions/ rather than inside it, so it is neither
+# churned by the next run nor gitignored: it turns up in `git status` the
+# moment it is written, which is the whole point.
+
+CAPTURE_FILENAME = "limit_events.jsonl"
+
+
+def capture_path(raw_output_path) -> Path:
+    """{data_dir}/limit_events.jsonl, found from an agent's raw stream path.
+
+    Located by walking up to the `sessions/` directory a run writes under, not
+    by counting path segments, so it survives a change in session layout.
+    """
+    path = Path(raw_output_path).resolve()
+    for parent in path.parents:
+        if parent.name == "sessions":
+            return parent.parent / CAPTURE_FILENAME
+    return path.parent / CAPTURE_FILENAME
+
+
+def capture_limit_event(event: dict, verdict: str, detail: str,
+                        raw_output_path, source: str = "") -> Path | None:
+    """Append one full terminal event to the capture file. Returns its path.
+
+    The WHOLE event, untruncated -- the point is the shape, and the shape is
+    what truncation removes. UpstreamError already prints 500 characters, which
+    is enough to read and not enough to correct the table from.
+
+    Never raises. A run that hit a rate limit is already having a bad time;
+    failing to write the evidence must not also fail the run.
+    """
+    if verdict not in ("rate_limit", "upstream"):
+        return None
+    try:
+        path = capture_path(raw_output_path)
+        record = {
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "verdict": verdict,
+            "detail": detail,
+            "source": source,
+            "raw_output_path": str(raw_output_path),
+            "event": event,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, default=str) + "\n")
+        return path
+    except Exception:
+        return None
+
+
+def capture_notice(path: Path | None, verdict: str,
+                   table: str = "RATE_LIMIT_TYPES / RATE_LIMIT_MARKERS in "
+                                "adw_modules/control.py") -> str:
+    """The line printed under a limit or unknown error, naming the evidence.
+
+    `table` is where THAT adapter keeps its markers — agy's live in
+    agent_agy.py, not here, and sending a reader to the wrong file is how the
+    correction never gets made.
+    """
+    if path is None:
+        return ""
+    if verdict == "rate_limit":
+        return (f"  captured the event to {path}\n"
+                f"  check it against {table} — attach a new shape to issue #9")
+    return (f"  captured the whole event to {path}\n"
+            f"  if it turns out to be a rate limit, its shape belongs in {table}")
 
 
 def _parse_reset_value(value, now: float) -> float | None:
@@ -277,12 +384,17 @@ def replayable(phase_name: str, completed: dict[str, str]) -> bool:
     return phase_name in completed
 
 
-def commit_already_made(porcelain: str, head_message: str, message: str) -> bool:
-    """True when `git commit` would be a no-op repeat of the commit already
-    at HEAD: nothing staged AND HEAD's message is the one we were about to
-    write. This is what makes a resumed run walk past a commit phase instead
-    of dying on "nothing to commit"."""
-    return not porcelain.strip() and head_message.strip() == message.strip()
+def commit_already_made(porcelain: str, recent_messages: str, message: str) -> bool:
+    """True when `git commit` would be a no-op repeat of a commit the branch
+    already carries: nothing staged AND the message we were about to write is
+    already on a recent commit. HEAD alone is not enough — by the time a run
+    is resumed, an engineer may have stacked commits (a harness fix, say) on
+    top of the one the replayed phase wrote, so the last few messages are
+    searched, record-separated by \\x1e. This is what makes a resumed run walk
+    past a commit phase instead of dying on "nothing to commit"."""
+    wanted = message.strip()
+    made = any(m.strip() == wanted for m in recent_messages.split("\x1e"))
+    return not porcelain.strip() and made
 
 
 # --- The fake -------------------------------------------------------------
