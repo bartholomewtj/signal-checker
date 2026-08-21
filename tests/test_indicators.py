@@ -10,11 +10,13 @@ import pandas as pd
 
 from strategies import (
     anchored_sma,
+    break_retest_long,
     last_swing_levels,
     rejection,
     sticky_state,
     swing_high,
     swing_low,
+    swing_low_break,
 )
 
 
@@ -105,3 +107,159 @@ def test_rejection_bull_and_bear_and_touch_without_cross():
     # Bar 2: opened below (95<100), poked above (101>100), closed back below
     # (90<100) -> bearish rejection.
     assert bear.iloc[2] and not bull.iloc[2]
+
+
+# ---------------------------------------------------------------------------
+# break_retest_long
+#
+# Shared prefix: bar 3 is the peak (High=110), confirmed at bar 4, so the
+# swing-high level is 110 from bar 4 onward until a later swing confirms.
+
+
+def _ohlc(rows):
+    o, h, l, c = zip(*rows)
+    return (
+        np.array(o, dtype=float),
+        np.array(h, dtype=float),
+        np.array(l, dtype=float),
+        np.array(c, dtype=float),
+    )
+
+
+_PREFIX = (
+    (100, 102, 99, 101),   # 0
+    (101, 104, 100, 103),  # 1
+    (103, 105, 102, 104),  # 2
+    (104, 110, 103, 108),  # 3 peak
+    (108, 108, 104, 105),  # 4 swing high confirms, level=110
+    (105, 107, 100, 102),  # 5
+    (102, 106, 101, 104),  # 6
+    (104, 107, 103, 105),  # 7
+    (105, 108, 104, 106),  # 8
+    (106, 109, 105, 108),  # 9 close 108 <= 110
+)
+
+
+def test_break_retest_enters_on_later_rejection_not_on_the_break_bar():
+    # Bar 10 gaps up through 110 and wicks back into it - that is the
+    # break, and would look like a rejection if we allowed the break bar.
+    # Bar 12 is the first later rejection.
+    rows = _PREFIX + (
+        (112, 116, 109, 114),  # 10 break + wick; must not enter
+        (114, 118, 112, 116),  # 11 no wick (low 112 > 110)
+        (112, 115, 109, 113),  # 12 retest: open>110, low<=110, close>110
+        (113, 117, 112, 116),  # 13
+    )
+    entry, armed = break_retest_long(*_ohlc(rows), window=5, close_mode="level")
+    assert entry[10] == 0.0
+    assert entry[12] == 1.0
+    assert entry.sum() == 1.0
+    assert armed[10] == 110.0
+    assert armed[11] == 110.0
+    assert armed[12] == 110.0
+    assert np.isnan(armed[13])
+
+
+def test_break_retest_freezes_the_broken_level_not_a_newer_swing_high():
+    # Bar 11 makes a higher high (118). That swing confirms at bar 12,
+    # so live last_swing_levels at bar 12 is 118. The retest is of 110.
+    rows = _PREFIX + (
+        (108, 116, 107, 114),  # 10 break of 110
+        (114, 118, 112, 116),  # 11 peak 118
+        (112, 115, 109, 113),  # 12 SH=118 confirms; retest of frozen 110
+    )
+    entry, armed = break_retest_long(*_ohlc(rows), window=5, close_mode="level")
+    assert entry[12] == 1.0
+    assert armed[12] == 110.0
+
+
+def test_break_retest_bullish_rejects_a_red_close_above_the_level():
+    rows = _PREFIX + (
+        (108, 116, 107, 114),  # 10 break
+        (114, 115, 109, 111),  # 11 red: close 111>110 but 111<open 114
+        (113, 117, 112, 116),
+    )
+    o, h, l, c = _ohlc(rows)
+    level, _ = break_retest_long(o, h, l, c, window=5, close_mode="level")
+    bull, _ = break_retest_long(o, h, l, c, window=5, close_mode="bullish")
+    assert level[11] == 1.0
+    assert bull[11] == 0.0
+    assert bull.sum() == 0.0
+
+
+def test_break_retest_upper_half_uses_the_bar_midpoint():
+    # Bar 11: range 109-115, midpoint 112. Close 111.5 is below it.
+    # Bar 12: range 109-115, midpoint 112. Close 113 is above it.
+    rows = _PREFIX + (
+        (108, 116, 107, 114),  # 10 break
+        (114, 115, 109, 111.5),  # 11 close above level, below midpoint
+        (111, 115, 109, 113),    # 12 close in upper half
+    )
+    o, h, l, c = _ohlc(rows)
+    upper, _ = break_retest_long(o, h, l, c, window=5, close_mode="upper_half")
+    level, _ = break_retest_long(o, h, l, c, window=5, close_mode="level")
+    assert level[11] == 1.0
+    assert upper[11] == 0.0
+    assert upper[12] == 1.0
+
+
+def test_break_retest_window_allows_bar_plus_5_not_plus_6():
+    # Break at 10, last legal retest is bar 15. Pad 11-14 with no wick.
+    above = (114, 118, 112, 116)  # low 112 > 110
+    retest = (112, 115, 109, 113)
+    rows_ok = _PREFIX + ((108, 116, 107, 114),) + (above,) * 4 + (retest,)
+    # bars: 10 break, 11-14 above, 15 retest
+    entry_ok, _ = break_retest_long(*_ohlc(rows_ok), window=5, close_mode="level")
+    assert entry_ok[15] == 1.0
+
+    rows_late = _PREFIX + ((108, 116, 107, 114),) + (above,) * 5 + (retest,)
+    # bars: 10 break, 11-15 above, 16 retest (expired)
+    entry_late, armed_late = break_retest_long(
+        *_ohlc(rows_late), window=5, close_mode="level")
+    assert entry_late[16] == 0.0
+    assert entry_late.sum() == 0.0
+    assert np.isnan(armed_late[16])
+
+
+def test_break_retest_close_back_below_the_level_disarms():
+    rows = _PREFIX + (
+        (108, 116, 107, 114),  # 10 break
+        (114, 115, 108, 109),  # 11 close 109 < 110 -> fail
+        (111, 115, 109, 113),  # 12 would have been a retest
+    )
+    entry, armed = break_retest_long(*_ohlc(rows), window=5, close_mode="level")
+    assert entry.sum() == 0.0
+    assert np.isnan(armed[11])
+    assert np.isnan(armed[12])
+
+
+def test_break_retest_first_retest_consumes_the_setup():
+    rows = _PREFIX + (
+        (108, 116, 107, 114),  # 10 break
+        (112, 115, 109, 113),  # 11 first retest
+        (112, 115, 109, 113),  # 12 second lookalike
+    )
+    entry, _ = break_retest_long(*_ohlc(rows), window=5, close_mode="level")
+    assert entry[11] == 1.0
+    assert entry[12] == 0.0
+    assert entry.sum() == 1.0
+
+
+def test_swing_low_break_crosses_down_through_confirmed_trough():
+    # Mirror of the swing-high prefix: trough at bar 3 (Low=90), confirmed
+    # at bar 4. Close then crosses down through 90 at bar 6.
+    rows = (
+        (100, 102, 99, 101),
+        (101, 103, 98, 100),
+        (100, 102, 97, 99),
+        (99, 100, 90, 92),    # 3 trough
+        (92, 94, 91, 93),     # 4 swing low confirms, level=90
+        (93, 95, 91, 92),     # 5 close 92 >= 90
+        (92, 93, 88, 89),     # 6 close 89 < 90
+        (89, 91, 87, 90),
+    )
+    o, h, l, c = _ohlc(rows)
+    brk = swing_low_break(l, c, n=1)
+    assert not brk[5]
+    assert brk[6]
+    assert brk.sum() == 1

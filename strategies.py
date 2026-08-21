@@ -559,6 +559,163 @@ class Combo(Devma):
         self.sig_short = self.I(lambda: f(short_all), plot=False)
 
 
+# ---------------------------------------------------------------------------
+# 9. Break then retest - swing-high break, buy the rejection back at the level
+
+def break_retest_long(open_, high, low, close, n=1, window=5, close_mode="level"):
+    """Long entries for: break a swing high, then a rejection retest.
+
+    A confirmed swing high is broken when close crosses up through it.
+    That broken level is frozen for `window` later bars - a newer swing
+    high does not move the retest target. A close back below the level,
+    or the window running out, disarms the setup.
+
+    A retest is a later bar that opens above the frozen level, wicks
+    into it (low <= level), and closes back above. The break bar itself
+    is never an entry. The first valid retest consumes the setup.
+    `close_mode`:
+      level      - that is enough
+      bullish    - also close > open
+      upper_half - also close in the upper half of the bar's range
+
+    Returns (entry, armed_level) as float arrays. armed_level is the
+    frozen swing high while the setup is live (including the entry bar)
+    and NaN otherwise.
+    """
+    o = np.asarray(open_, dtype=float)
+    h = np.asarray(high, dtype=float)
+    l = np.asarray(low, dtype=float)
+    c = np.asarray(close, dtype=float)
+    sh = last_swing_levels(h, swing_high(pd.Series(h), n).to_numpy(), 1)[0]
+
+    entry = np.zeros(len(c), dtype=float)
+    armed_level = np.full(len(c), np.nan)
+    freeze = np.nan
+    until = -1
+    broke_at = -1
+
+    def extra_ok(i):
+        if close_mode == "bullish":
+            return c[i] > o[i]
+        if close_mode == "upper_half":
+            rng = h[i] - l[i]
+            return True if rng <= 0 else c[i] >= l[i] + 0.5 * rng
+        return True
+
+    for i in range(len(c)):
+        if not np.isnan(freeze) and (i > until or c[i] < freeze):
+            freeze = np.nan
+            until = -1
+            broke_at = -1
+
+        if np.isnan(freeze) and i > 0 and not np.isnan(sh[i]):
+            if c[i - 1] <= sh[i] and c[i] > sh[i]:
+                freeze = sh[i]
+                until = i + window
+                broke_at = i
+
+        is_entry = False
+        if not np.isnan(freeze) and i != broke_at:
+            if (o[i] > freeze and l[i] <= freeze and c[i] > freeze
+                    and extra_ok(i)):
+                is_entry = True
+
+        armed_level[i] = freeze
+        if is_entry:
+            entry[i] = 1.0
+            freeze = np.nan
+            until = -1
+            broke_at = -1
+
+    return entry, armed_level
+
+
+def swing_low_break(low, close, n=1):
+    """True when close crosses down through the most recent swing low."""
+    l = np.asarray(low, dtype=float)
+    c = np.asarray(close, dtype=float)
+    sl = last_swing_levels(l, swing_low(pd.Series(l), n).to_numpy(), 1)[0]
+    prev = np.concatenate([[np.nan], c[:-1]])
+    return (~np.isnan(sl)) & (prev >= sl) & (c < sl)
+
+
+_EXIT_HOLD = {
+    "hold_5": (5, False),
+    "hold_10": (10, False),
+    "hold_20": (20, False),
+    "stop_5": (5, True),
+    "stop_10": (10, True),
+    "stop_20": (20, True),
+}
+
+
+class BreakRetest(Base):
+    """Long-only: break of a swing high, then buy the rejection retest.
+
+    Not the same as structure_break, which buys the break itself. After
+    a daily close crosses up through a confirmed swing high, wait up to
+    `retest_window` bars for a bar that wicks into that frozen level and
+    closes back above. close_mode tightens the close. exit_mode is a
+    time hold, a hold plus a stop at the retest low, a close back below
+    the level, or a break of the most recent swing low.
+
+    The grid is larger than usual because the four exits were asked for
+    together rather than as four separate ideas.
+    """
+    close_mode = "level"
+    exit_mode = "hold_10"
+    retest_window = 5
+    fractal_n = 1
+    direction = "long"
+
+    GRID = {
+        "close_mode": ["level", "bullish", "upper_half"],
+        "exit_mode": [
+            "hold_5", "hold_10", "hold_20",
+            "stop_5", "stop_10", "stop_20",
+            "fail_level", "swing_low",
+        ],
+    }
+    WARMUP = 60
+
+    def init(self):
+        o, h, l, c = (self.data.Open.s, self.data.High.s,
+                      self.data.Low.s, self.data.Close.s)
+        entry, armed = break_retest_long(
+            o, h, l, c, n=self.fractal_n, window=self.retest_window,
+            close_mode=self.close_mode)
+        bear = swing_low_break(l, c, n=self.fractal_n)
+        self.entry = self.I(lambda: entry, plot=False)
+        self.armed_level = self.I(lambda: armed, plot=False)
+        self.bear_break = self.I(lambda: bear.astype(float), plot=False)
+        self.entry_level = np.nan
+
+    def next(self):
+        hold_n, use_stop = _EXIT_HOLD.get(self.exit_mode, (None, False))
+
+        if self.position:
+            if hold_n is not None and self.trades:
+                held = len(self.data) - 1 - self.trades[-1].entry_bar
+                if held >= hold_n:
+                    self.position.close()
+            elif self.exit_mode == "fail_level":
+                if (not np.isnan(self.entry_level)
+                        and self.data.Close[-1] < self.entry_level):
+                    self.position.close()
+            elif self.exit_mode == "swing_low":
+                if self.bear_break[-1] > 0:
+                    self.position.close()
+
+        if self.entry[-1] > 0 and not self.position.is_long:
+            level = self.armed_level[-1]
+            sl = self.data.Low[-1] if use_stop else None
+            if sl is not None:
+                self.buy(sl=sl)
+            else:
+                self.buy()
+            self.entry_level = level
+
+
 REGISTRY = {
     "diamond_hands": DiamondHands,
     "trend_step": TrendStep,
@@ -568,6 +725,7 @@ REGISTRY = {
     "vwap_rejection": VWAPRejection,
     "devma": Devma,
     "combo": Combo,
+    "break_retest": BreakRetest,
 }
 
 
