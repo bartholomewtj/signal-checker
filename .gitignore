@@ -2,6 +2,7 @@ __pycache__/
 data/
 report*.txt
 holdout_*.txt
+last_run.html
 
 # sssf runtime
 adws/adw_data/sessions/

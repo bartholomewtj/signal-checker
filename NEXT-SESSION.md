@@ -1,16 +1,21 @@
 # Next session
 
-_Last handoff: 2026-08-21 — `main` at PR #14 and #16_
+_Last handoff: 2026-08-21 — `main` at PR #17_
 
 ## Where this stopped
 
 The idea-testing factory is on `main`. You describe an idea. The agent
 asks clarifying questions (`ask_user_question`), writes a Strategy
-class, runs pytest and `--quick` only. A full `check.py` run is a logged
-trial and raises Bonferroni N.
+class, runs `just test` and `just check` only. A full run is
+`just check-full` — that is a logged trial and raises Bonferroni N.
 
-PR #14 (liqproxy + `liq_flush`) and PR #16 (`break_retest`) are merged.
-Both ideas were previewed only. Neither is on the ledger.
+When a check finishes, `last_run.html` opens: verdict, four gates,
+walk-forward equity vs buy-and-hold, shuffle histograms. `just visual`
+reopens it. `--no-open` writes the file without opening a browser.
+
+PR #17 (verdict page + `just check`) is merged. PR #14 (`liq_flush`) and
+PR #16 (`break_retest`) were already on `main`. Both ideas were previewed
+only. Neither is on the ledger.
 
 `liq_flush` — sell a big long-liquidation day, buy a big short-liquidation
 day. The two legs are not alike. Selling long flushes is dead (forward
@@ -43,16 +48,16 @@ DEVMA forward-test (issue #1) stays parked.
 
 ```
 cd C:\ClaudeOS\Projects\signalchecker
-uv run --with pytest --with-requirements requirements.txt pytest -q tests
-uv run --with-requirements requirements.txt python ledger.py status
+just test
+just ledger
 ```
 
-114 tests. Ledger: N=5, bar=0.0100. Contract: `ADDING-AN-IDEA.md`.
+128 tests. Ledger: N=5, bar=0.0100. Contract: `ADDING-AN-IDEA.md`.
 
 ## Next thing to do
 
 1. Bring a new idea. Agent follows `ADDING-AN-IDEA.md` — questions first,
-   then a class, then `--quick` only. Do not log unless you say so.
+   then a class, then `just check` only. Do not log unless you say so.
 2. Later: dashboard reads `trials.csv` generally (no strategy pins).
 3. Later: generic paper-trade logger, only after some idea earns LOOKS REAL.
 
@@ -67,8 +72,9 @@ uv run --with-requirements requirements.txt python ledger.py status
 
 ## Watch out for
 
-- Do not run a full `check.py` unless asked to log it. `--quick` does
-  not write `trials.csv`.
+- `just check` is `--quick` (display only). `just check-full` writes
+  `trials.csv` and raises N. Do not run full unless asked to log it.
+- `just visual` reopens `last_run.html`. It does not re-run the pipeline.
 - Do not re-tune existing examples off hold-out numbers.
 - `combo`, `liq_flush`, and `break_retest` stay negative. Do not "fix"
   them into a pass.
@@ -81,4 +87,5 @@ uv run --with-requirements requirements.txt python ledger.py status
   run from NO EDGE to NOT PROVEN, because with ~5 folds and ~35 trades
   the fold boundaries matter that much. Read those verdicts as a range,
   not a number.
-- Plain `python` lacks pandas. Use `uv run --with-requirements requirements.txt`.
+- Plain `python` lacks pandas. The `just` recipes wrap
+  `uv run --with-requirements requirements.txt`.

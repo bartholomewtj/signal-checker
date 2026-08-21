@@ -23,13 +23,15 @@ Do NOT load: `docs/UNIFIED-ROADMAP.md`, `ANALYSIS.md`, robustness scripts, `adws
 1. **Stop. Ask first.** Call `ask_user_question` before writing any class. Lock at least: asset, timeframe, entry, exit, direction (both / long / short). If the idea is still vague after one round, ask again. Do not skip this because the idea "sounds clear."
 2. Copy `NewIdea`, rename it, fill `init` / `next`. Causal indicators only. Any rolling min/max that must not include the current bar uses `.shift(1)`. Set `GRID` (small) and `WARMUP`. A rolling yardstick a value is compared *against* (mean, median, standard deviation) takes `.shift(1)` too, so an outlier does not inflate the bar it has to clear.
 3. Add the new name to `REGISTRY`.
-4. `uv run --with pytest --with-requirements requirements.txt pytest -q tests` — lookahead runs on every registry name.
-5. Only if they ask for a smoke look: `python check.py --strategy <name> --timeframe <tf> --quick`. **Never** a full `check.py` unless they say to log it.
+4. `just test` — lookahead runs on every registry name.
+5. Only if they ask for a smoke look: `just check <name> <tf>`. **Never**
+   `just check-full` unless they say to log it.
 
 ## Outputs
 
 - New class + `REGISTRY` line in `strategies.py`
 - No `trials.csv` write. No `report_*.txt` from a preview.
+  `--quick` still writes `last_run.html` (display only) and opens it.
 
 ## Human check
 

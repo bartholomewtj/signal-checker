@@ -12,13 +12,13 @@ you describe the idea
         ↓
 agent asks clarifying questions, then writes a class in strategies.py
         ↓
-pytest -q tests          (lookahead runs automatically)
+just test                (lookahead runs automatically)
         ↓
-check.py --strategy X --timeframe T --quick
-        (verdict on screen, not logged)
+just check X T
+        (verdict page opens, not logged)
         ↓
 you read it. if you want it on the ledger:
-check.py --strategy X --timeframe T
+just check-full X T
         (full shuffles, appends mode=full, N goes up)
 ```
 
@@ -31,23 +31,26 @@ to log it.
 From `C:\ClaudeOS\Projects\signalchecker`:
 
 ```
-uv run --with pytest --with-requirements requirements.txt pytest -q tests
-uv run --with-requirements requirements.txt python check.py --strategy devma --timeframe 12h --quick
-uv run --with-requirements requirements.txt python ledger.py status
+just check devma 12h
 ```
 
-`--quick` / `--preview` is a rough answer in about a minute and does
-**not** write `trials.csv`. A full run is tens of minutes (200 in-sample
-shuffles + 100 walk-forward) and **is** a logged trial.
-
-Dashboard:
+About a minute. Verdict page opens when it finishes. Does **not** write
+`trials.csv`. Other recipes:
 
 ```
-python dashboard.py
+just check-full devma 12h   # logged trial, tens of minutes, N goes up
+just visual                 # reopen last_run.html
+just test
+just ledger
+just dash                   # http://localhost:8787
 ```
 
-http://localhost:8787. Charts use the vendored Lightweight Charts file
-(no CDN). Dashboard runs are not ledger rows.
+`--quick` / `--preview` is display only. A full run is a logged trial.
+`just visual` reopens the last page without running anything. `--no-open`
+on check.py writes `last_run.html` without opening it.
+
+Dashboard (`just dash`) is a live chart of one strategy. Those runs are
+not ledger rows. Charts use the vendored Lightweight Charts file (no CDN).
 
 Named idea already in the registry (no LLM):
 
@@ -138,6 +141,7 @@ are in `docs/UNIFIED-ROADMAP.md`.
 - `permute.py` — Masters bar-permutation
 - `ledger.py` — `status` / `list`
 - `dashboard.py` / `dashboard.html` — local UI
+- `visual.py` — `last_run.html` after a check.py run
 - `refine.py` — named idea → spec
 - `docs/UNIFIED-ROADMAP.md` — longer plan
 - `vendor/lightweight-charts.standalone.production.js` — chart library
