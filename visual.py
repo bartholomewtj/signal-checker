@@ -13,6 +13,7 @@ from __future__ import annotations
 import html
 import math
 import os
+import sys
 import webbrowser
 from datetime import datetime
 
@@ -615,3 +616,20 @@ def points_from_series(series, n=400):
         t = ts.strftime("%Y-%m-%d") if hasattr(ts, "strftime") else str(ts)[:10]
         out.append({"t": t, "v": fv})
     return out
+
+
+def main(path=None):
+    """Reopen last_run.html. Exit 1 if check.py has not written one yet."""
+    path = path or DEFAULT_PATH
+    if not os.path.exists(path):
+        print(
+            "No last_run.html yet. Run: just check <strategy> <timeframe>",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    print(path)
+    open_in_browser(path)
+
+
+if __name__ == "__main__":
+    main()

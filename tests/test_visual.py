@@ -170,6 +170,25 @@ def test_equity_axis_uses_compact_labels():
     assert "913,444" not in html
 
 
+def test_main_exits_when_last_run_missing(tmp_path):
+    missing = tmp_path / "last_run.html"
+    try:
+        visual.main(path=str(missing))
+    except SystemExit as e:
+        assert e.code == 1
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_main_opens_existing_file(tmp_path, monkeypatch):
+    path = tmp_path / "last_run.html"
+    path.write_text("<html></html>", encoding="utf-8")
+    opened = []
+    monkeypatch.setattr(visual, "open_in_browser", opened.append)
+    visual.main(path=str(path))
+    assert opened == [str(path)]
+
+
 def test_inf_scores_do_not_crash():
     html = visual.render(_result(
         is_pf=float("inf"),
