@@ -63,11 +63,17 @@ def permute_bars(df, start_index=0, rng=None):
     out = pd.DataFrame(
         np.exp(new), index=df.index, columns=["Open", "High", "Low", "Close"]
     )
-    # Volume travels with the bar whose shape it belonged to.
-    if "Volume" in df.columns:
-        vol = df["Volume"].to_numpy().copy()
-        vol[start_index + 1 :] = df["Volume"].to_numpy()[perm_bars]
-        out["Volume"] = vol
+    # Every non-OHLC column (Volume, and any extra series a strategy needs
+    # such as a liquidation reading) travels with the bar whose shape it
+    # belonged to. Without this the shuffled data would keep those columns
+    # in real time order, leaving a genuine signal intact and making the
+    # honesty test far too easy to pass.
+    for col in df.columns:
+        if col in ("Open", "High", "Low", "Close"):
+            continue
+        vals = df[col].to_numpy().copy()
+        vals[start_index + 1 :] = df[col].to_numpy()[perm_bars]
+        out[col] = vals
     return out
 
 
