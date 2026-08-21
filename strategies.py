@@ -633,6 +633,134 @@ class LiqFlush(Base):
             self.buy()
 
 
+# ---------------------------------------------------------------------------
+# 10. Break then retest - swing-high break, buy the rejection back at the level
+
+def break_retest_long(open_, high, low, close, n=1, window=5):
+    """Long entries: break a swing high, then a wick retest of that level.
+
+    A confirmed swing high is broken when close crosses up through it.
+    That broken level is frozen for `window` later bars - a newer swing
+    high does not move the retest target. A close back below the level,
+    or the window running out, disarms the setup.
+
+    A retest is a later bar that opens above the frozen level, wicks
+    into it (low <= level), and closes back above. The break bar itself
+    is never an entry. The first valid retest consumes the setup.
+
+    Returns (entry, armed_level, break_high). armed_level is the frozen
+    swing high while the setup is live. break_high is the high of the
+    break bar, for the take-profit that targets it.
+    """
+    o = np.asarray(open_, dtype=float)
+    h = np.asarray(high, dtype=float)
+    l = np.asarray(low, dtype=float)
+    c = np.asarray(close, dtype=float)
+    sh = last_swing_levels(h, swing_high(pd.Series(h), n).to_numpy(), 1)[0]
+
+    entry = np.zeros(len(c), dtype=float)
+    armed_level = np.full(len(c), np.nan)
+    break_high = np.full(len(c), np.nan)
+    freeze = np.nan
+    until = -1
+    broke_at = -1
+    peak = np.nan
+
+    for i in range(len(c)):
+        if not np.isnan(freeze) and (i > until or c[i] < freeze):
+            freeze = np.nan
+            until = -1
+            broke_at = -1
+            peak = np.nan
+
+        if np.isnan(freeze) and i > 0 and not np.isnan(sh[i]):
+            if c[i - 1] <= sh[i] and c[i] > sh[i]:
+                freeze = sh[i]
+                until = i + window
+                broke_at = i
+                peak = h[i]
+
+        is_entry = False
+        if not np.isnan(freeze) and i != broke_at:
+            if o[i] > freeze and l[i] <= freeze and c[i] > freeze:
+                is_entry = True
+
+        armed_level[i] = freeze
+        break_high[i] = peak
+        if is_entry:
+            entry[i] = 1.0
+            freeze = np.nan
+            until = -1
+            broke_at = -1
+            peak = np.nan
+
+    return entry, armed_level, break_high
+
+
+def swing_low_break(low, close, n=1):
+    """True when close crosses down through the most recent swing low."""
+    l = np.asarray(low, dtype=float)
+    c = np.asarray(close, dtype=float)
+    sl = last_swing_levels(l, swing_low(pd.Series(l), n).to_numpy(), 1)[0]
+    prev = np.concatenate([[np.nan], c[:-1]])
+    return (~np.isnan(sl)) & (prev >= sl) & (c < sl)
+
+
+class BreakRetest(Base):
+    """Long-only: break of a swing high, then buy the wick retest.
+
+    After a daily close crosses up through a confirmed swing high, wait
+    up to `retest_window` bars for a bar that opens above that frozen
+    level, wicks into it, and closes back above. The three exits on the
+    grid: flatten on a bearish structure break (close through the latest
+    swing low), take profit at the break bar's high, or flatten after
+    10 bars.
+    """
+    exit_mode = "hold_10"
+    retest_window = 5
+    fractal_n = 1
+    direction = "long"
+
+    GRID = {"exit_mode": ["structure_break", "break_high", "hold_10"]}
+    WARMUP = 60
+
+    def init(self):
+        o, h, l, c = (self.data.Open.s, self.data.High.s,
+                      self.data.Low.s, self.data.Close.s)
+        entry, armed, peak = break_retest_long(
+            o, h, l, c, n=self.fractal_n, window=self.retest_window)
+        bear = swing_low_break(l, c, n=self.fractal_n)
+        self.entry = self.I(lambda: entry, plot=False)
+        self.armed_level = self.I(lambda: armed, plot=False)
+        self.break_high = self.I(lambda: peak, plot=False)
+        self.bear_break = self.I(lambda: bear.astype(float), plot=False)
+        self.target = np.nan
+
+    def next(self):
+        if self.position:
+            if self.exit_mode == "hold_10" and self.trades:
+                held = len(self.data) - 1 - self.trades[-1].entry_bar
+                if held >= 10:
+                    self.position.close()
+            elif self.exit_mode == "structure_break":
+                if self.bear_break[-1] > 0:
+                    self.position.close()
+            elif self.exit_mode == "break_high":
+                if (not np.isnan(self.target)
+                        and self.data.High[-1] >= self.target):
+                    self.position.close()
+
+        if self.entry[-1] > 0 and not self.position.is_long:
+            if self.exit_mode == "break_high":
+                tp = self.break_high[-1]
+                # Target already printed on the signal bar: skip rather
+                # than buy into a fill that is already through the high.
+                if np.isnan(tp) or self.data.Close[-1] >= tp:
+                    return
+                self.target = tp
+            self.buy()
+
+
 REGISTRY = {
     "diamond_hands": DiamondHands,
     "trend_step": TrendStep,
@@ -643,6 +771,7 @@ REGISTRY = {
     "devma": Devma,
     "combo": Combo,
     "liq_flush": LiqFlush,
+    "break_retest": BreakRetest,
 }
 
 
