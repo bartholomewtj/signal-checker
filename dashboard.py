@@ -35,6 +35,7 @@ warnings.filterwarnings(
 
 import check
 import data
+import liqproxy
 from strategies import REGISTRY
 
 PORT = 8787
@@ -80,6 +81,8 @@ def run_backtest(strategy, symbol, timeframe, fresh=False):
             df = data.update(symbol, timeframe, since)
         else:
             df = data.load(symbol=symbol, timeframe=timeframe, since=since)
+    if getattr(strat, "NEEDS_LIQ", False):
+        df = liqproxy.attach(df, symbol=symbol, timeframe=timeframe)
     params = {k: getattr(strat, k) for k in strat.GRID}
     rets, stats = check.run(df, strat, params)
 

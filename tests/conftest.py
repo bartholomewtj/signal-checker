@@ -54,8 +54,13 @@ def synthetic_frame():
         high = np.maximum(open_, close) + noise
         low = np.minimum(open_, close) - noise
         volume = rng.uniform(100, 1000, size=n)
+        # Liquidation proxy columns for strategies that need them. Lognormal
+        # so the series is fat-tailed like the real thing and the outlier
+        # tests in those strategies actually fire.
+        long_liq = np.exp(rng.normal(19.0, 0.6, size=n))
+        short_liq = np.exp(rng.normal(19.0, 0.6, size=n))
         return pd.DataFrame({
             "Open": open_, "High": high, "Low": low, "Close": close,
-            "Volume": volume,
+            "Volume": volume, "LongLiq": long_liq, "ShortLiq": short_liq,
         }, index=idx)
     return _make

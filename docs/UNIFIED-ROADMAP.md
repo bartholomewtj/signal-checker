@@ -275,7 +275,10 @@ Definitions, first use:
 |---|---|---|
 | Crypto majors | `data/*.csv` fetched by `data.fetch_ohlcv` via **ccxt**. Tries `binance`, `bybit`, `okx`, `kraken` in order. Files are named `BTC-USDT_12h.csv` etc. | **Pin venue = Binance, quote = USDT.** Do not silently fall through to another exchange on a refresh — that fragments trial identity (algoideas locked this). Keep the existing CSVs; they *are* the snapshot. Never yfinance for crypto. |
 | ETFs / equities / gold | `data/yahoo_*.csv` via Yahoo chart API in `data.load_yahoo` (no yfinance package). `equities_devma.py` docstring says stooq; the files and loader are Yahoo — trust the code. | Keep Yahoo for ETFs. Closed list for *new* hypotheses: SPY, QQQ, IWM, EFA, EEM, TLT, GLD (algoideas). Existing robustness files (AAPL, MSFT, JPM, XOM, IJR) stay as historical batteries, not an open universe. |
+| Crypto derivatives metrics | `data/*_liqproxy_1h.csv` built by `liqproxy.py` from Binance open interest at `data.binance.vision` (futures/um/daily/metrics). Hourly long/short liquidation estimate in USD. | **Append-only, same rule as price bars** — cached hours are never re-fetched or rewritten. Hourly is the stored resolution because it divides into 4h/12h/1d; do not cache at a run's timeframe. Bars the cache cannot fully cover are dropped, not half-counted. It is a **proxy, not a liquidation print** — open interest also falls on voluntary closes — so a verdict built on it carries that caveat into `trials.csv`. Coverage starts 2020-09 (BTC) / 2021-12 (rest), which shortens the walk-forward. |
 | FX | None | Out. |
+
+**Do not buy a liquidation feed to replace the proxy without re-running everything that used it.** Real prints and the open-interest estimate are different datasets; mixing them inside one `trials.csv` breaks comparison the same way switching venue would. Binance's own `liquidationSnapshot` dumps are gone, and Coinglass/Coinalyze need a paid key — that is why the proxy exists.
 
 **Do not re-download crypto from Coinbase** to match the algoideas default. That would be a new dataset and would invalidate comparison with `trials.csv` and the DEVMA hold-out.
 
