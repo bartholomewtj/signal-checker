@@ -562,17 +562,21 @@ class Combo(Devma):
 # ---------------------------------------------------------------------------
 # 9. Break then retest - swing-high break, buy the rejection back at the level
 
-def break_retest_long(open_, high, low, close, n=1, window=5, close_mode="level"):
-    """Long entries for: break a swing high, then a rejection retest.
+def break_retest_long(open_, high, low, close, n=1, window=5, close_mode="level",
+                      wick_ratio=0.4, proximity=0.01):
+    """Long entries for: break a swing high, then a fuzzy wick retest.
 
     A confirmed swing high is broken when close crosses up through it.
     That broken level is frozen for `window` later bars - a newer swing
     high does not move the retest target. A close back below the level,
     or the window running out, disarms the setup.
 
-    A retest is a later bar that opens above the frozen level, wicks
-    into it (low <= level), and closes back above. The break bar itself
-    is never an entry. The first valid retest consumes the setup.
+    A retest is a later bar with a long lower wick (lower wick / range
+    >= `wick_ratio`) whose low sits near the frozen level (within
+    `proximity` as a fraction of price, above or below - it does not
+    have to tag the exact price) and whose close is back above the
+    level. The break bar itself is never an entry. The first valid
+    retest consumes the setup.
     `close_mode`:
       level      - that is enough
       bullish    - also close > open
@@ -602,6 +606,19 @@ def break_retest_long(open_, high, low, close, n=1, window=5, close_mode="level"
             return True if rng <= 0 else c[i] >= l[i] + 0.5 * rng
         return True
 
+    def is_retest(i, level):
+        rng = h[i] - l[i]
+        if rng <= 0 or np.isnan(level) or level <= 0:
+            return False
+        lower_wick = min(o[i], c[i]) - l[i]
+        if lower_wick / rng < wick_ratio:
+            return False
+        if abs(l[i] - level) > level * proximity:
+            return False
+        if c[i] <= level:
+            return False
+        return extra_ok(i)
+
     for i in range(len(c)):
         if not np.isnan(freeze) and (i > until or c[i] < freeze):
             freeze = np.nan
@@ -614,11 +631,8 @@ def break_retest_long(open_, high, low, close, n=1, window=5, close_mode="level"
                 until = i + window
                 broke_at = i
 
-        is_entry = False
-        if not np.isnan(freeze) and i != broke_at:
-            if (o[i] > freeze and l[i] <= freeze and c[i] > freeze
-                    and extra_ok(i)):
-                is_entry = True
+        is_entry = (not np.isnan(freeze) and i != broke_at
+                    and is_retest(i, freeze))
 
         armed_level[i] = freeze
         if is_entry:
@@ -650,12 +664,13 @@ _EXIT_HOLD = {
 
 
 class BreakRetest(Base):
-    """Long-only: break of a swing high, then buy the rejection retest.
+    """Long-only: break of a swing high, then buy a fuzzy wick retest.
 
     Not the same as structure_break, which buys the break itself. After
     a daily close crosses up through a confirmed swing high, wait up to
-    `retest_window` bars for a bar that wicks into that frozen level and
-    closes back above. close_mode tightens the close. exit_mode is a
+    `retest_window` bars for a long lower wick whose low is near that
+    frozen level (within `proximity`, not an exact tag) and whose close
+    is back above it. close_mode tightens the close. exit_mode is a
     time hold, a hold plus a stop at the retest low, a close back below
     the level, or a break of the most recent swing low.
 
@@ -666,6 +681,8 @@ class BreakRetest(Base):
     exit_mode = "hold_10"
     retest_window = 5
     fractal_n = 1
+    wick_ratio = 0.4
+    proximity = 0.01
     direction = "long"
 
     GRID = {
@@ -683,7 +700,8 @@ class BreakRetest(Base):
                       self.data.Low.s, self.data.Close.s)
         entry, armed = break_retest_long(
             o, h, l, c, n=self.fractal_n, window=self.retest_window,
-            close_mode=self.close_mode)
+            close_mode=self.close_mode, wick_ratio=self.wick_ratio,
+            proximity=self.proximity)
         bear = swing_low_break(l, c, n=self.fractal_n)
         self.entry = self.I(lambda: entry, plot=False)
         self.armed_level = self.I(lambda: armed, plot=False)
