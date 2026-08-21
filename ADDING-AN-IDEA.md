@@ -30,6 +30,7 @@ Do NOT load: `docs/UNIFIED-ROADMAP.md`, `ANALYSIS.md`, robustness scripts, `adws
 
 - New class + `REGISTRY` line in `strategies.py`
 - No `trials.csv` write. No `report_*.txt` from a preview.
+  `--quick` still writes `last_run.html` (display only) and opens it.
 
 ## Human check
 

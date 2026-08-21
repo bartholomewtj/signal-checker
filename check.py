@@ -42,6 +42,7 @@ warnings.filterwarnings(
 
 import data
 import liqproxy
+import visual
 from permute import permute_bars
 from strategies import REGISTRY
 
@@ -248,6 +249,27 @@ def trial_announcement(strategy, timeframe, path=None):
     return n_now, n_after, bar, is_new
 
 
+def _finite_list(xs):
+    out = []
+    for x in xs:
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(v):
+            out.append(v)
+    return out
+
+
+def emit_visual(result, args):
+    """Write last_run.html and optionally open it."""
+    path = visual.write(result)
+    print(f"Visual: {path}", flush=True)
+    if not getattr(args, "no_open", False):
+        visual.open_in_browser(path)
+    return path
+
+
 def walkforward(df, strat, train_bars, test_bars):
     """Optimize on a rolling window, trade the next chunk, stitch results.
 
@@ -341,6 +363,8 @@ def main():
     ap.add_argument("--i-know-this-burns-the-holdout", action="store_true",
                     dest="burn_holdout",
                     help="allow a second --holdout for a pair that already has one")
+    ap.add_argument("--no-open", action="store_true",
+                    help="write last_run.html but do not open a browser")
     args = ap.parse_args()
     if args.preview:
         args.quick = True
@@ -385,11 +409,11 @@ def main():
             f"(hold-out, untouched)")
     else:
         say("Reserved:      none - dataset is shorter than 12 months")
+    n_now, n_after, bar, is_new = trial_announcement(
+        args.strategy, args.timeframe)
     if is_preview(args):
         say("DISPLAY ONLY — not logged in trials.csv")
     else:
-        n_now, n_after, bar, is_new = trial_announcement(
-            args.strategy, args.timeframe)
         pair_note = ("new pair, N becomes "
                      if is_new else "same pair, N stays ")
         say(f"Logged trial:  N={n_now} now; {pair_note}{n_after}; "
@@ -415,7 +439,7 @@ def main():
     say(f"STAGE 2 - In-sample honesty test ({n_is} shuffles)")
     best, real_is_pf = optimize(df, strat)
     say(f"  Best in-sample params: {best}, trade-level profit factor {real_is_pf:.3f}")
-    p_is, _ = mcpt_insample(df, strat, real_is_pf, n_is)
+    p_is, perm_is = mcpt_insample(df, strat, real_is_pf, n_is)
     say(f"  p-value: {p_is:.3f}  "
         f"(chance that shuffled noise scores this well)")
 
@@ -444,8 +468,8 @@ def main():
     say()
     say("=" * 62)
     say(f"STAGE 4 - Walk-forward honesty test ({n_wf} shuffles, slow)")
-    p_wf, _ = mcpt_walkforward(df, strat, args.train_bars, args.test_bars,
-                               wf_pf, n_wf)
+    p_wf, perm_wf = mcpt_walkforward(df, strat, args.train_bars, args.test_bars,
+                                     wf_pf, n_wf)
     say(f"  p-value: {p_wf:.3f}")
 
     # ---- Verdict ----
@@ -475,10 +499,65 @@ def main():
         verdict = "NO EDGE"
         say("  NO EDGE FOUND. The backtest result is consistent with luck.")
 
+    wf_equity, bh_equity = [], []
+    if len(wf_rets):
+        wf_eq = 100_000.0 * np.exp(wf_rets.cumsum())
+        wf_equity = visual.points_from_series(wf_eq)
+        bh_slice = df.loc[wf_rets.index[0]:wf_rets.index[-1], "Close"]
+        if len(bh_slice) and float(bh_slice.iloc[0]) != 0:
+            bh_eq = 100_000.0 * bh_slice / float(bh_slice.iloc[0])
+            bh_equity = visual.points_from_series(bh_eq)
+
+    result = {
+        "strategy": args.strategy,
+        "timeframe": args.timeframe,
+        "direction": direction_label,
+        "preview": is_preview(args),
+        "window": (
+            f"{len(df)} {args.timeframe} bars, "
+            f"{df.index[0].date()} to {df.index[-1].date()}"
+        ),
+        "verdict": verdict,
+        "checks": [
+            {"name": "Made money out of sample",
+             "detail": f"PF {wf_pf:.2f} > 1.0", "ok": wf_pf > 1.0},
+            {"name": "Enough out-of-sample trades",
+             "detail": f"{wf_trades} >= 30", "ok": wf_trades >= 30},
+            {"name": "In-sample beats noise",
+             "detail": f"p {p_is:.3f} < 0.05", "ok": p_is < 0.05},
+            {"name": "Walk-forward beats noise",
+             "detail": f"p {p_wf:.3f} < 0.05", "ok": p_wf < 0.05},
+        ],
+        "stage1": {
+            "return_pct": total_return,
+            "bh_pct": stats["Buy & Hold Return [%]"],
+            "pf": profit_factor(rets),
+            "max_dd": stats["Max. Drawdown [%]"],
+            "trades": int(stats["# Trades"]),
+        },
+        "best_params": str(best),
+        "is_pf": real_is_pf,
+        "p_is": p_is,
+        "perm_is": _finite_list(perm_is),
+        "wf_return_pct": wf_total,
+        "wf_pf": wf_pf,
+        "wf_sharpe": wf_sharpe,
+        "wf_trades": wf_trades,
+        "wf_bh_pct": wf_bh,
+        "wf_equity": wf_equity,
+        "bh_equity": bh_equity,
+        "folds": folds,
+        "p_wf": p_wf,
+        "perm_wf": _finite_list(perm_wf),
+        "n_after": n_after,
+        "corrected_bar": bar,
+    }
+
     # ---- Multiple-testing ledger ----
     if is_preview(args):
         say()
         say("  DISPLAY ONLY — not logged in trials.csv")
+        emit_visual(result, args)
         return
 
     append_trial({
@@ -507,16 +586,23 @@ def main():
         f"clears corrected: {'YES' if p_is < corrected else 'NO'}")
     say(f"    walk-forward  p={p_wf:.4f}   clears raw: {'YES' if p_wf < 0.05 else 'NO'}   "
         f"clears corrected: {'YES' if p_wf < corrected else 'NO'}")
+    result["n_trials"] = n_trials
+    result["corrected_bar"] = corrected
     if verdict == "LOOKS REAL" and (p_is >= corrected or p_wf >= corrected):
         say()
         say(f"  Passes at 0.05, but with {n_trials} trials the corrected bar is "
             f"{corrected:.4f} - treat LOOKS REAL as provisional.")
+        result["provisional"] = (
+            f"Passes at 0.05. With {n_trials} trials the corrected bar is "
+            f"{corrected:.4f}. Treat LOOKS REAL as provisional."
+        )
 
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        f"report_{args.strategy}_{args.timeframe}.txt")
     with open(out, "w") as fh:
         fh.write("\n".join(lines) + "\n")
     print(f"\nSaved to {out}")
+    emit_visual(result, args)
 
 
 def run_holdout(args, strat, full_df, work_df, holdout_df, direction_label):

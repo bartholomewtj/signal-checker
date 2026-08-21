@@ -40,6 +40,11 @@ uv run --with-requirements requirements.txt python ledger.py status
 **not** write `trials.csv`. A full run is tens of minutes (200 in-sample
 shuffles + 100 walk-forward) and **is** a logged trial.
 
+When the run finishes, `last_run.html` opens in your browser: verdict,
+four gates, walk-forward equity vs buy-and-hold, and shuffle histograms.
+`--no-open` writes the file without opening it. Previews write this file
+too; they still do not write `trials.csv` or `report_*.txt`.
+
 Dashboard:
 
 ```
@@ -138,6 +143,7 @@ are in `docs/UNIFIED-ROADMAP.md`.
 - `permute.py` — Masters bar-permutation
 - `ledger.py` — `status` / `list`
 - `dashboard.py` / `dashboard.html` — local UI
+- `visual.py` — `last_run.html` after a check.py run
 - `refine.py` — named idea → spec
 - `docs/UNIFIED-ROADMAP.md` — longer plan
 - `vendor/lightweight-charts.standalone.production.js` — chart library
