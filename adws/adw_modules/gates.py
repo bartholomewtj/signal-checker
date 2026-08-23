@@ -19,20 +19,21 @@ from .data_types import EnvelopeBase, GateReport
 
 TAIL_CHARS = 1000        # command output kept as evidence on a failure
 
-# A place the reviewer claims to have opened. "looks good" and a blank
-# string do not match. Shapes beyond file:N (#57, #58): pytest/bun node IDs,
-# line ranges, diff-stat prose, and a git SHA.
+# A place the reviewer claims to have opened. "looks good", a blank string,
+# a bare number and a bare SHA do not match (#87). Shapes beyond file:N
+# (#57, #58): pytest/bun node IDs, a repo-relative path, line ranges, and
+# diff-stat prose ("README.md +15 lines").
 _FILE_LINE = re.compile(
     r'(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+(?:::[A-Za-z_][A-Za-z0-9_]*)+'
     r'|(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+:\d+(?:-\d+)?'
+    r'|(?:[A-Za-z0-9_.-]+[/\\])+[A-Za-z0-9_.-]+\.[A-Za-z0-9]+'
     r'|[A-Za-z0-9_.-]+\.[A-Za-z0-9]+(?:::[A-Za-z_][A-Za-z0-9_]*)+'
     r'|[A-Za-z0-9_.-]+\.[A-Za-z0-9]+:\d+(?:-\d+)?'
-    r'|[A-Za-z0-9_.-]+\.[A-Za-z0-9]+[\s:+\-—–]+\d+'
     r'|[A-Za-z0-9_.-]+\.[A-Za-z0-9]+\s+lines?\s+\d+-\d+'
+    r'|[A-Za-z0-9_.-]+\.[A-Za-z0-9]+\s*[+\-]\d+\s+lines?'
     r'|[A-Za-z_][A-Za-z0-9_]*\(\)\s+lines?\s+\d+-\d+'
     r'|[A-Za-z_][A-Za-z0-9_]*\s+lines?\s+\d+-\d+'
 )
-_SHA = re.compile(r'\b[0-9a-f]{7}(?:[0-9a-f]{33})?\b', re.I)
 
 
 # A run the reviewer claims to have made, plus what it returned. Some
@@ -52,16 +53,24 @@ _COMMAND = re.compile(
 # reviewer quoting exactly that output and the gate not recognising it.
 # #57 / #58: "40 tests passed", "clean"/"untouched", a commit SHA, and a
 # comma-list of filenames after git status.
+# #105: the commonest scope outcome is counted, not quoted -- "git diff --stat
+# -> those two files only", "git status only the four planned files", "git diff
+# --stat against those paths empty". The command is named and the result is
+# given; only the wording was outside the list. This widens the OUTCOME half
+# only, so a bare assertion with no command still fails.
+_NUM = r'\d+|one|two|three|four|five|six|seven|eight|nine|ten'
 _OUTCOME = re.compile(
     r'\b(?:\d+\s+(?:tests?\s+)?(?:pass(?:ed)?|fail(?:ed)?)'
     r'|\d+\s+(?:skipped|errors?|coords?|entries)'
     r'|\d+\s+files?\s+changed'
     r'|exit(?:\s+code)?\s+\d+|no\s+(?:errors|mismatches|changes)'
-    r'|untouched|unchanged|unmodified|clean'
+    r'|untouched|unchanged|unmodified|clean|empty'
     r'|absent from (?:the )?(?:diff|changed files))\b'
     r'|(?:^|\s)[MADR?]{1,2}\s+[\w./\\-]+\.\w+'
     r'|\b[0-9a-f]{7}(?:[0-9a-f]{33})?\b'
-    r'|[A-Za-z0-9_.-]+\.[A-Za-z0-9]+(?:\s*,\s*[A-Za-z0-9_.-]+\.[A-Za-z0-9]+)+',
+    r'|[A-Za-z0-9_.-]+\.[A-Za-z0-9]+(?:\s*,\s*[A-Za-z0-9_.-]+\.[A-Za-z0-9]+)+'
+    rf'|\b(?:only|just|exactly)\s+(?:the\s+)?(?:those|these|that|{_NUM})\b'
+    rf'|\b(?:those|these)\s+(?:{_NUM})?\s*(?:files?|paths?|entries)\s+only\b',
     re.I)
 
 
@@ -73,12 +82,13 @@ def _has_run_evidence(evidence: str) -> bool:
 def _has_file_line(evidence: str) -> bool:
     """Did the reviewer name somewhere it actually looked?
 
-    A file:line (or a node ID, line range, diff-stat, SHA), or a command with
-    the result it returned. Anything else -- "looks good", a blank string, an
-    unbacked claim -- is not evidence.
+    A file:line (or a node ID, a path, a line range, diff-stat prose), or a
+    command with the result it returned. Anything else -- "looks good", a
+    blank string, a bare number, a bare SHA -- is not evidence. A SHA counts
+    only alongside a git command, which _has_run_evidence handles (#87).
     """
     e = evidence or ""
-    return bool(_FILE_LINE.search(e) or _SHA.search(e) or _has_run_evidence(e))
+    return bool(_FILE_LINE.search(e) or _has_run_evidence(e))
 
 
 def _size(path: Path) -> str:
@@ -120,11 +130,15 @@ def json_parses(envelope: EnvelopeBase, run) -> GateReport:
     return report
 
 
-def _deleted_from_head(path: str) -> bool:
+def _deleted_from_head(path: str, cwd=None) -> bool:
     """True when the path is tracked in HEAD but gone from the working tree —
-    the one honest way a claimed change can point at a file that does not exist."""
+    the one honest way a claimed change can point at a file that does not exist.
+
+    `cwd` is the repo to ask. Without it git answers about the process's own
+    directory, which is right only while every caller runs from the repo root.
+    """
     result = subprocess.run(["git", "cat-file", "-e", f"HEAD:{path}"],
-                            capture_output=True)
+                            cwd=cwd, capture_output=True)
     return result.returncode == 0
 
 
@@ -137,7 +151,7 @@ def diff_matches_claims(envelope: EnvelopeBase, run) -> GateReport:
         if p.exists():
             report.check(f, True, f"exists, {_size(p)}")
         else:
-            deleted = _deleted_from_head(f)
+            deleted = _deleted_from_head(f, cwd=run.repo_root)
             report.check(f, deleted,
                          "deleted — tracked in HEAD, absent from the tree" if deleted
                          else "claimed changed file does not exist")

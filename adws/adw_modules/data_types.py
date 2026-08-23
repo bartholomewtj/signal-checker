@@ -170,6 +170,11 @@ class QualityResult(BaseModel):
     checks: list[QualityCheckResult] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     artifacts: list[str] = Field(default_factory=list)
+    # True when EVERY command was the shipped placeholder — the phase ran, but
+    # nothing was actually checked. `passed` alone cannot say that: a
+    # placeholder exits 0, so a repo with no suite wired up looks green. An ADW
+    # reads this to refuse acceptance (see utils.placeholder_blocks_acceptance).
+    placeholder: bool = False
 
 
 # ── Change capture (git diff, deterministic) ─────────────────────────────────
@@ -388,6 +393,12 @@ class PiRequest(BaseModel):
     tools: Optional[list[str]] = None
     extensions: list[str] = Field(default_factory=list)
     cwd: str = "."                  # set from run.repo_root — the codebase root agents work in
+    # Repo paths this agent must not write, in SSSF pattern form (see
+    # permissions.deny_globs). An interface whose CLI can refuse a tool call
+    # before it lands translates these into its own rule syntax; one that
+    # cannot ignores them, and permissions.enforce() still catches the write
+    # after the phase. Empty means "nothing extra to forbid".
+    deny_writes: list[str] = Field(default_factory=list)
 
 
 class UsageBreakdown(BaseModel):
