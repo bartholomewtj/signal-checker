@@ -22,9 +22,8 @@ just check-full X T
         (full shuffles, appends mode=full, N goes up)
 ```
 
-New idea: read `ADDING-AN-IDEA.md`. The agent must ask you questions
-before writing any class. Do not run a full `check.py` unless you say
-to log it.
+The agent must ask you questions before writing any class. Do not run
+a full `check.py` unless you say to log it.
 
 ## How to run it
 
@@ -127,13 +126,10 @@ traders close voluntarily. Judge results accordingly.
 The ten registry classes are examples the pipeline already judged.
 `combo` is a documented negative — do not "fix" it. `liq_flush` and
 `break_retest` have previews only, no logged trial; do not "fix"
-either into a pass. Historical write-up:
-`ANALYSIS.md` and `ROBUSTNESS.md`. Later honesty upgrades (CPCV / DSR)
-are in `docs/UNIFIED-ROADMAP.md`.
+either into a pass.
 
 ## Files
 
-- `ADDING-AN-IDEA.md` — contract for a new idea
 - `check.py` — four stages, verdict, `trials.csv`
 - `strategies.py` — named ideas (`REGISTRY`) plus an unregistered template
 - `data.py` — Binance via ccxt, Yahoo for ETFs
@@ -143,8 +139,8 @@ are in `docs/UNIFIED-ROADMAP.md`.
 - `dashboard.py` / `dashboard.html` — local UI
 - `visual.py` — `last_run.html` after a check.py run
 - `refine.py` — named idea → spec
-- `docs/UNIFIED-ROADMAP.md` — longer plan
 - `vendor/lightweight-charts.standalone.production.js` — chart library
+- `ARCHIVE.md` — what stayed off GitHub
 
 ## Credit
 
