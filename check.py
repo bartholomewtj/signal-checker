@@ -376,7 +376,20 @@ def main():
     n_is = args.insample_perms or (30 if args.quick else 200)
     n_wf = args.wf_perms or (10 if args.quick else 100)
 
-    full_df = data.load(timeframe=args.timeframe, since=args.since)
+    if getattr(strat, "YAHOO", None):
+        full_df = data.load_yahoo(strat.YAHOO)
+        if getattr(strat, "OVERNIGHT", False):
+            nxt = full_df["Open"].shift(-1)
+            remapped = pd.DataFrame({
+                "Open": full_df["Close"],
+                "High": np.maximum(full_df["Close"].to_numpy(), nxt.to_numpy()),
+                "Low": np.minimum(full_df["Close"].to_numpy(), nxt.to_numpy()),
+                "Close": nxt,
+                "Volume": full_df["Volume"],
+            }, index=full_df.index).dropna()
+            full_df = remapped
+    else:
+        full_df = data.load(timeframe=args.timeframe, since=args.since)
     if getattr(strat, "NEEDS_LIQ", False):
         # Strategy needs the liquidation proxy columns. This also trims the
         # frame to the bars the proxy covers (Binance open interest starts

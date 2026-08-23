@@ -761,6 +761,324 @@ class BreakRetest(Base):
             self.buy()
 
 
+
+class LiuMom(Base):
+    """Liu and Tsyvinski (Yale/NBER): buy a sharp weekly rise, hold a week.
+
+    Risks and Returns of Cryptocurrency, NBER w24877. The rule they
+    highlighted: if the past lookback return is at least `threshold`,
+    go long and flatten after `hold_bars`. Long only. Causal: the
+    return is known at this close; the engine fills the next open.
+    """
+    lookback = 7
+    threshold = 0.20
+    hold_bars = 7
+    direction = "long"
+
+    GRID = {"lookback": [7, 14], "threshold": [0.15, 0.20, 0.25]}
+    WARMUP = 30
+
+    def init(self):
+        close = self.data.Close.s
+        lb = int(self.lookback)
+        self.ret = self.I(lambda: close.pct_change(lb), plot=False)
+
+    def next(self):
+        if np.isnan(self.ret[-1]):
+            return
+        if self.position and self.trades:
+            held = len(self.data) - 1 - self.trades[-1].entry_bar
+            if held >= int(self.hold_bars):
+                self.position.close()
+        if self.ret[-1] >= float(self.threshold) and not self.position.is_long:
+            self.buy()
+
+
+
+class FaberSma(Base):
+    """Meb Faber QTAA 10-month SMA, applied to BTC.
+
+    At month-end, long if close is above the SMA of monthly closes,
+    flat if below. Long only, no shorts. Signal is known at the
+    month-end close; the engine fills the next open.
+    """
+    months = 10
+    direction = "long"
+
+    GRID = {"months": [6, 10, 12]}
+    WARMUP = 280
+
+    def init(self):
+        close = self.data.Close.s
+        n = int(self.months)
+        monthly = close.resample("ME").last()
+        sma = monthly.rolling(n).mean()
+        sma_daily = sma.reindex(close.index, method="ffill")
+        month_end = close.groupby(close.index.to_period("M")).transform("last")
+        is_me = close.eq(month_end)
+        stance = pd.Series(np.nan, index=close.index)
+        stance.loc[is_me] = np.where(
+            close.loc[is_me] > sma_daily.loc[is_me], 1.0, -1.0)
+        self.stance = self.I(lambda: stance.ffill(), plot=False)
+
+    def next(self):
+        if np.isnan(self.stance[-1]):
+            return
+        if self.stance[-1] > 0 and not self.position.is_long:
+            self.buy()
+        elif self.stance[-1] < 0 and self.position.is_long:
+            self.position.close()
+
+
+
+class Tsmom(Base):
+    """Moskowitz, Ooi, Pedersen (AQR) time-series momentum, on BTC.
+
+    Long if the lookback return is positive, short if negative.
+    Always in. This is the sign rule only, no vol targeting.
+    """
+    lookback = 252
+    direction = "both"
+
+    GRID = {"lookback": [126, 252, 365]}
+    WARMUP = 400
+
+    def init(self):
+        close = self.data.Close.s
+        lb = int(self.lookback)
+        self.ret = self.I(lambda: close.pct_change(lb), plot=False)
+
+    def next(self):
+        if np.isnan(self.ret[-1]):
+            return
+        if self.ret[-1] > 0 and not self.position.is_long:
+            self.position.close()
+            self.buy()
+        elif self.ret[-1] < 0 and not self.position.is_short:
+            self.position.close()
+            self.sell()
+
+
+
+class Ewmac(Base):
+    """Rob Carver EWMAC sign rule, on BTC.
+
+    Long while the fast EWMA is above the slow EWMA (slow = 4 * fast),
+    short while below. Sign only, no forecast scalar or vol targeting.
+    """
+    fast = 16
+    direction = "both"
+
+    GRID = {"fast": [8, 16, 32]}
+    WARMUP = 160
+
+    def init(self):
+        close = self.data.Close.s
+        n = int(self.fast)
+        slow = 4 * n
+        self.fast_ma = self.I(lambda: close.ewm(span=n, min_periods=n).mean(), plot=False)
+        self.slow_ma = self.I(lambda: close.ewm(span=slow, min_periods=slow).mean(), plot=False)
+
+    def next(self):
+        if np.isnan(self.fast_ma[-1]) or np.isnan(self.slow_ma[-1]):
+            return
+        if self.fast_ma[-1] > self.slow_ma[-1] and not self.position.is_long:
+            self.position.close()
+            self.buy()
+        elif self.fast_ma[-1] < self.slow_ma[-1] and not self.position.is_short:
+            self.position.close()
+            self.sell()
+
+
+
+class DayMom(Base):
+    """Zaremba et al., IRFA 2021: large-cap coins show daily momentum.
+
+    Last day's return predicts the next day in the same direction on
+    the most liquid coins. Long if the lookback return is positive,
+    short if negative. Always in.
+    """
+    lookback = 1
+    direction = "both"
+
+    GRID = {"lookback": [1, 2, 3]}
+    WARMUP = 10
+
+    def init(self):
+        close = self.data.Close.s
+        lb = int(self.lookback)
+        self.ret = self.I(lambda: close.pct_change(lb), plot=False)
+
+    def next(self):
+        if np.isnan(self.ret[-1]):
+            return
+        if self.ret[-1] > 0 and not self.position.is_long:
+            self.position.close()
+            self.buy()
+        elif self.ret[-1] < 0 and not self.position.is_short:
+            self.position.close()
+            self.sell()
+
+
+class MondayLong(Base):
+    """Caporale and Plastun, FRL 2019: BTC Monday returns are higher.
+
+    Signal Sunday to buy (fills Monday open). Flatten after hold_days
+    weekday bars so hold_days=1 exits Tuesday open. Long only.
+    """
+    hold_days = 1
+    direction = "long"
+
+    GRID = {"hold_days": [1, 2]}
+    WARMUP = 10
+
+    def init(self):
+        close = self.data.Close.s
+        dow = pd.Series(close.index.dayofweek, index=close.index)
+        self.dow = self.I(lambda: dow.astype(float), plot=False)
+
+    def next(self):
+        if np.isnan(self.dow[-1]):
+            return
+        d = int(self.dow[-1])
+        if d == 6 and not self.position.is_long:
+            self.buy()
+        elif self.position.is_long and self.trades:
+            held = len(self.data) - 1 - self.trades[-1].entry_bar
+            if held >= int(self.hold_days):
+                self.position.close()
+
+
+
+class VolMom(Base):
+    """Barroso and Santa-Clara (2015) vol-managed overlay on TSMOM.
+
+    Same sign rule as Moskowitz-Ooi-Pedersen: long if lookback return
+    is positive, short if negative. Flatten when prior-bar realized vol
+    (annualised) is above vol_cap. Vol uses .shift(1) so today's bar
+    does not set the gate it has to clear. No continuous size scaling.
+    """
+    lookback = 252
+    vol_window = 20
+    vol_cap = 0.90
+    direction = "both"
+
+    GRID = {"lookback": [126, 252], "vol_cap": [0.70, 0.90, 1.20]}
+    WARMUP = 400
+
+    def init(self):
+        close = self.data.Close.s
+        lb = int(self.lookback)
+        vw = int(self.vol_window)
+        rets = close.pct_change()
+        self.mom = self.I(lambda: close.pct_change(lb), plot=False)
+        self.vol = self.I(
+            lambda: rets.shift(1).rolling(vw).std() * (365.25 ** 0.5),
+            plot=False,
+        )
+
+    def next(self):
+        if np.isnan(self.mom[-1]) or np.isnan(self.vol[-1]):
+            return
+        if self.vol[-1] > float(self.vol_cap):
+            if self.position:
+                self.position.close()
+            return
+        if self.mom[-1] > 0 and not self.position.is_long:
+            self.position.close()
+            self.buy()
+        elif self.mom[-1] < 0 and not self.position.is_short:
+            self.position.close()
+            self.sell()
+
+
+
+class Mom121(Base):
+    """Time-series 12-1 momentum on BTC.
+
+    Return from close.shift(lookback) to close.shift(skip). Long if that
+    return > 0, short if < 0. Always in. Both closes are lagged; signal
+    known at this close; the engine fills the next open.
+    """
+    lookback = 252
+    skip = 21
+    direction = "both"
+
+    GRID = {"lookback": [252, 365], "skip": [21]}
+    WARMUP = 400
+
+    def init(self):
+        close = self.data.Close.s
+        lb = int(self.lookback)
+        sk = int(self.skip)
+        self.ret = self.I(lambda: close.shift(sk) / close.shift(lb) - 1.0, plot=False)
+
+    def next(self):
+        if np.isnan(self.ret[-1]):
+            return
+        if self.ret[-1] > 0 and not self.position.is_long:
+            self.position.close()
+            self.buy()
+        elif self.ret[-1] < 0 and not self.position.is_short:
+            self.position.close()
+            self.sell()
+
+
+
+class Week52(Base):
+    """George and Hwang (JF 2004) 52-week high, on BTC.
+
+    Long while close is within `near` of the prior lookback high
+    (rolling max of High, shifted one bar so today does not set
+    the bar it has to clear). Flatten when it is not. Long only.
+    """
+    lookback = 252
+    near = 0.90
+    direction = "long"
+
+    GRID = {"lookback": [126, 252], "near": [0.85, 0.90, 0.95]}
+    WARMUP = 280
+
+    def init(self):
+        high = self.data.High.s
+        close = self.data.Close.s
+        lb = int(self.lookback)
+        prior_high = high.rolling(lb).max().shift(1)
+        self.ratio = self.I(lambda: close / prior_high, plot=False)
+
+    def next(self):
+        if np.isnan(self.ratio[-1]):
+            return
+        if self.ratio[-1] >= float(self.near) and not self.position.is_long:
+            self.buy()
+        elif self.ratio[-1] < float(self.near) and self.position.is_long:
+            self.position.close()
+
+
+
+class CloseOpen(Base):
+    """Buy the close, sell the next open. Overnight only.
+
+    Each bar is remapped in check.py so Open is today's close and
+    Close is tomorrow's open. Always long on that series. Long only.
+    """
+    YAHOO = "MU"
+    OVERNIGHT = True
+    on = 1
+    direction = "long"
+
+    GRID = {"on": [1]}
+    WARMUP = 5
+
+    def init(self):
+        close = self.data.Close.s
+        self.ones = self.I(lambda: pd.Series(1.0, index=close.index), plot=False)
+
+    def next(self):
+        if not self.position.is_long:
+            self.buy()
+
+
 REGISTRY = {
     "diamond_hands": DiamondHands,
     "trend_step": TrendStep,
@@ -772,6 +1090,16 @@ REGISTRY = {
     "combo": Combo,
     "liq_flush": LiqFlush,
     "break_retest": BreakRetest,
+    "liu_mom": LiuMom,
+    "faber_sma": FaberSma,
+    "tsmom": Tsmom,
+    "ewmac": Ewmac,
+    "day_mom": DayMom,
+    "monday_long": MondayLong,
+    "vol_mom": VolMom,
+    "mom_121": Mom121,
+    "week52": Week52,
+    "close_open": CloseOpen,
 }
 
 
