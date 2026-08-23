@@ -11,6 +11,7 @@ No extra dependencies. The file is self-contained (inline SVG).
 from __future__ import annotations
 
 import html
+import json
 import math
 import os
 import sys
@@ -587,6 +588,19 @@ def write(result, path=None):
     html_out = render(result)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(html_out)
+    payload = {
+        k: result.get(k)
+        for k in (
+            "strategy", "timeframe", "direction", "verdict", "preview",
+            "window", "checks", "folds", "stage1", "best_params",
+            "wf_equity", "bh_equity", "wf_return_pct", "wf_pf",
+            "wf_sharpe", "wf_trades", "wf_bh_pct", "p_is", "p_wf",
+            "is_pf", "perm_is", "perm_wf",
+        )
+    }
+    json_path = path[:-5] + ".json" if path.endswith(".html") else path + ".json"
+    with open(json_path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, default=str)
     return path
 
 
