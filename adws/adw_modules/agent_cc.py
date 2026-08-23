@@ -346,6 +346,90 @@ def _record_session(session_dir: Path, key: str) -> None:
     ledger.write_text(json.dumps(sorted(known), indent=2))
 
 
+def path_deny_rule(pattern: str) -> str:
+    """One SSSF protected pattern as a Claude Code permission rule.
+
+    `Edit(<path>)` is the file-permission rule, and the CLI says so itself if
+    you write `Write(...)`: "only Edit(path) rules are [matched by file
+    permission checks] — Edit rules cover all file-editing tools."
+
+    A directory prefix (`adws/adw_modules/`) becomes `adws/adw_modules/**`.
+    A glob (`adws/adw_*.py`) and a plain path go through as written; the CLI
+    reads them relative to cwd, which is repo_root, and matches the absolute
+    file_path an agent actually sends.
+    """
+    body = f"{pattern}**" if pattern.endswith("/") else pattern
+    return f"Edit({body})"
+
+
+def _build_command(request: PiRequest, model_id: str, cc_session: str,
+                   starting: bool) -> list[str]:
+    """The full argv for one `claude -p` turn.
+
+    Its own function so a test can read the argv without faking a subprocess.
+    Argument ORDER is load-bearing — see the two comment blocks below.
+    """
+    cmd = [
+        CC_PATH, "-p",
+        "--output-format", "stream-json", "--verbose",
+        "--model", model_id,
+        "--effort", EFFORT.get(request.thinking, request.thinking),
+        "--permission-mode", PERMISSION_MODE,
+        # Agents get ZERO MCP servers. Without this the CLI loads whatever the
+        # operator has configured at user, project and plugin level, so an
+        # agent's tool surface changes from machine to machine and reaches
+        # services no roster declared. --strict-mcp-config restricts MCP to
+        # what --mcp-config names, and we name nothing. Granting a server on
+        # purpose would mean passing --mcp-config here; that is not built yet.
+        "--strict-mcp-config",
+        "--system-prompt", request.system_prompt,
+    ]
+    # Creating and continuing are different flags for the same idea. Getting
+    # this backwards is not a soft failure: --session-id on a live session
+    # errors out, and --resume on a missing one starts from nothing, which
+    # looks like an agent that forgot the plan it just wrote.
+    cmd += (["--session-id", cc_session] if starting else ["--resume", cc_session])
+    # --allowedTools/--disallowedTools are variadic: they consume every
+    # following argument until the next flag. A prompt appended after them is
+    # silently eaten as another tool name, and the CLI then dies claiming no
+    # prompt was given. Keep them last in argv and send the prompt through
+    # stdin, which the CLI documents as the equal alternative.
+    #
+    # Both flags are needed to reproduce pi's `--tools` semantics. The deny
+    # list is the enforcing half — under bypassPermissions an allow list
+    # approves nothing that was not already approved. The allow list still
+    # matters the moment the operator flips CC_PERMISSION_MODE to something
+    # stricter, so it is kept.
+    #
+    # Protected paths ride the SAME flag, as `Edit(<glob>)` rules. Deny rules
+    # apply in every permission mode, bypassPermissions included, so this is
+    # the one thing in the argv that can stop a write while it is happening
+    # rather than roll it back afterwards. Measured against the CLI on
+    # 2026-08-23, under --permission-mode bypassPermissions:
+    #
+    #   Edit / Write tool on a denied path      blocked
+    #   Bash: printf ... > denied/path          blocked
+    #   Bash: cp src denied/path                blocked
+    #   Bash: sed -i ... denied/path            blocked
+    #   PowerShell: Set-Content denied/path     blocked
+    #   Bash: cd denied && printf ... > path    NOT blocked
+    #   Bash: python -c "open('den'+'ied/p')"   NOT blocked
+    #
+    # So the shell side is a literal-path check, not a sandbox: it catches an
+    # agent that reaches for a forbidden file, and misses one that assembles
+    # the path. permissions.enforce() stays the enforcement; this only moves
+    # the honest case from "phase dies at the end" to "tool call fails now".
+    denied_tools = sorted(DENYABLE_TOOLS - set(request.tools)) if request.tools else []
+    denied_paths = [path_deny_rule(p) for p in request.deny_writes]
+    if request.tools:
+        cmd += ["--allowedTools", ",".join(request.tools)]
+    if denied_tools or denied_paths:
+        cmd += ["--disallowedTools",
+                *([",".join(denied_tools)] if denied_tools else []),
+                *denied_paths]
+    return cmd
+
+
 def run(request: PiRequest, on_event: Optional[Callable[[dict], None]] = None,
         on_spawn: Optional[Callable[[int], None]] = None,
         on_exit: Optional[Callable[[int], None]] = None) -> PiResult:
@@ -368,35 +452,7 @@ def run(request: PiRequest, on_event: Optional[Callable[[dict], None]] = None,
     cc_session = session_uuid(request.session_id)
     starting = _is_new_session(session_dir, request.session_id)
 
-    cmd = [
-        CC_PATH, "-p",
-        "--output-format", "stream-json", "--verbose",
-        "--model", model_id,
-        "--effort", EFFORT.get(request.thinking, request.thinking),
-        "--permission-mode", PERMISSION_MODE,
-        "--system-prompt", request.system_prompt,
-    ]
-    # Creating and continuing are different flags for the same idea. Getting
-    # this backwards is not a soft failure: --session-id on a live session
-    # errors out, and --resume on a missing one starts from nothing, which
-    # looks like an agent that forgot the plan it just wrote.
-    cmd += (["--session-id", cc_session] if starting else ["--resume", cc_session])
-    # --allowedTools/--disallowedTools are variadic: they consume every
-    # following argument until the next flag. A prompt appended after them is
-    # silently eaten as another tool name, and the CLI then dies claiming no
-    # prompt was given. Keep them last in argv and send the prompt through
-    # stdin, which the CLI documents as the equal alternative.
-    #
-    # Both flags are needed to reproduce pi's `--tools` semantics. The deny
-    # list is the enforcing half — under bypassPermissions an allow list
-    # approves nothing that was not already approved. The allow list still
-    # matters the moment the operator flips CC_PERMISSION_MODE to something
-    # stricter, so it is kept.
-    if request.tools:
-        cmd += ["--allowedTools", ",".join(request.tools)]
-        denied = sorted(DENYABLE_TOOLS - set(request.tools))
-        if denied:
-            cmd += ["--disallowedTools", ",".join(denied)]
+    cmd = _build_command(request, model_id, cc_session, starting)
 
     raw_path = Path(request.raw_output_path)
     raw_path.parent.mkdir(parents=True, exist_ok=True)
