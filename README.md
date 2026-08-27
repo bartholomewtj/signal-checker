@@ -42,14 +42,20 @@ just visual                 # reopen last_run.html
 just test
 just ledger
 just dash                   # http://localhost:8787
+just log-devma              # append today's DEVMA long-only 1d position
 ```
+
+`just log-devma` writes one line to `forward/devma_lo_1d.csv`. It is not a ledger row and it does not burn the holdout year. A second run on the same candle prints `already logged` and writes nothing.
 
 `--quick` / `--preview` is display only. A full run is a logged trial.
 `just visual` reopens the last page without running anything. `--no-open`
 on check.py writes `last_run.html` without opening it.
 
-Dashboard (`just dash`) is a live chart of one strategy. Those runs are
-not ledger rows. Charts use the vendored Lightweight Charts file (no CDN).
+Dashboard (`just dash`) is a live chart of one strategy, plus an
+all-strategies overview (current position and last signal date on
+BTC/USDT 1d). Those runs are not ledger rows. Charts use the vendored
+Lightweight Charts file (no CDN). Click an overview row to open that
+strategy in the chart.
 
 Named idea already in the registry (no LLM):
 

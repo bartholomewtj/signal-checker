@@ -58,10 +58,21 @@
     border-radius: 6px; padding: 4px 8px; font-size: 12px; color: var(--ink2); }
   #status { color: var(--ink3); font-size: 12px; margin-left: auto; }
   .err { color: var(--down); }
+  #overview { width: 100%; }
+  #overview tbody tr { cursor: pointer; }
+  #overview tbody tr:hover { background: #232a33; }
+  #overview tbody tr.active { outline: 1px solid var(--accent); }
+  #overview-status { color: var(--ink3); font-size: 12px; font-weight: 400; }
 </style>
 </head>
 <body>
 <h1>signal-check <span>· live strategy dashboard</span></h1>
+
+<div class="panel"><h2>All strategies · BTC/USDT 1d <span id="overview-status"></span></h2>
+  <table id="overview"><thead><tr>
+    <th>Strategy</th><th>Position</th><th>Last signal</th><th>Last candle</th><th>Verdict</th>
+  </tr></thead><tbody></tbody></table>
+</div>
 
 <div class="bar">
   <select id="strategy"></select>
@@ -182,7 +193,43 @@ $("auto").onchange = e => {
   if (e.target.checked) timer = setInterval(() => run(true), 60_000);
 };
 
-loadMeta().then(() => run(false));
+async function loadOverview() {
+  $("overview-status").textContent = "loading…";
+  try {
+    const r = await (await fetch("/api/overview?symbol=BTC/USDT&timeframe=1d")).json();
+    if (r.error) throw new Error(r.error);
+    const body = $("overview").querySelector("tbody");
+    const vcls = v => v === "LOOKS REAL" ? "real"
+                    : v === "NOT PROVEN" ? "maybe" : "none";
+    body.innerHTML = (r.rows || []).map(row => {
+      const pos = row.error ? "?" : row.position;
+      const signal = row.last_signal ? row.last_signal.slice(0, 10) : "–";
+      const candle = row.last_candle ? String(row.last_candle).slice(0, 10) : "–";
+      const title = row.error ? ` title="${row.error.replace(/"/g, "'")}"` : "";
+      return `<tr data-strategy="${row.strategy}"${title}>
+        <td>${row.strategy}</td>
+        <td><span class="badge ${pos}">${pos}</span></td>
+        <td>${signal}</td>
+        <td>${candle}</td>
+        <td><span class="badge ${vcls(row.verdict)}">${row.verdict || "?"}</span></td>
+      </tr>`;
+    }).join("");
+    body.querySelectorAll("tr").forEach(tr => {
+      tr.onclick = () => {
+        body.querySelectorAll("tr").forEach(x => x.classList.remove("active"));
+        tr.classList.add("active");
+        $("strategy").value = tr.dataset.strategy;
+        $("timeframe").value = "1d";
+        run(false);
+      };
+    });
+    $("overview-status").textContent = r.rows.length + " strategies";
+  } catch (e) {
+    $("overview-status").innerHTML = `<span class="err">${e.message}</span>`;
+  }
+}
+
+loadMeta().then(() => { run(false); loadOverview(); });
 </script>
 </body>
 </html>

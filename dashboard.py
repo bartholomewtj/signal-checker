@@ -4,12 +4,14 @@ strategies.
 Run:  python dashboard.py
 Then open http://localhost:8787 in a browser.
 
-Pick a strategy, asset and timeframe; the server runs the backtest on
-the spot (a fraction of a second on cached data) and the page shows the
-price chart with every trade marked, the equity curve, headline stats,
-the strategy's position right now, and the honesty-test verdicts from
-the reports. "Update data" pulls only the newest candles from the
-exchange, so refreshing is quick.
+The top of the page lists every registered strategy's current position
+and last signal date (BTC/USDT 1d). Pick a row, or a strategy/asset/
+timeframe in the bar; the server runs the backtest on the spot (a
+fraction of a second on cached data) and the page shows the price chart
+with every trade marked, the equity curve, headline stats, the
+strategy's position right now, and the honesty-test verdicts from the
+reports. "Update data" pulls only the newest candles from the exchange,
+so refreshing is quick.
 
 No new dependencies: Python's built-in web server plus the vendored
 TradingView Lightweight Charts file in vendor/.
@@ -71,6 +73,64 @@ def verdicts():
         out.append({"strategy": m.group(1), "timeframe": m.group(2) or "12h",
                     "verdict": verdict})
     return out
+
+
+def _position_from_trades(trades, last_bar):
+    """Current side and last entry time. FLAT if the last trade has exited."""
+    position = "FLAT"
+    last_signal = None
+    if len(trades):
+        last = trades.iloc[-1]
+        if last["ExitTime"] >= last_bar:
+            position = "LONG" if last["Size"] > 0 else "SHORT"
+        last_signal = str(last["EntryTime"])
+    return position, last_signal
+
+
+def position_snapshot(strategy, symbol="BTC/USDT", timeframe="1d"):
+    """Position and last signal only — no chart payload.
+
+    Used by the overview grid and the DEVMA forward log. Not a ledger row.
+    Does not touch holdout.
+    """
+    strat = REGISTRY[strategy]
+    since = "2021-01-01" if timeframe == "1h" else "2017-09-01"
+    with _lock:
+        df = data.load(symbol=symbol, timeframe=timeframe, since=since)
+    if getattr(strat, "NEEDS_LIQ", False):
+        df = liqproxy.attach(df, symbol=symbol, timeframe=timeframe)
+    params = {k: getattr(strat, k) for k in strat.GRID}
+    _rets, stats = check.run(df, strat, params)
+    last_bar = df.index[-1]
+    position, last_signal = _position_from_trades(stats["_trades"], last_bar)
+    return {
+        "strategy": strategy,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "position": position,
+        "last_signal": last_signal,
+        "last_candle": str(last_bar),
+    }
+
+
+def overview(symbol="BTC/USDT", timeframe="1d"):
+    """One row per registered strategy: position + last signal date."""
+    vmap = {(v["strategy"], v["timeframe"]): v["verdict"] for v in verdicts()}
+    rows = []
+    for name in sorted(REGISTRY):
+        try:
+            row = position_snapshot(name, symbol, timeframe)
+            row["verdict"] = vmap.get((name, timeframe)) or vmap.get((name, "12h")) or "?"
+            row["error"] = None
+        except Exception as e:
+            row = {
+                "strategy": name, "symbol": symbol, "timeframe": timeframe,
+                "position": "?", "last_signal": None, "last_candle": None,
+                "verdict": vmap.get((name, timeframe)) or "?",
+                "error": str(e),
+            }
+        rows.append(row)
+    return {"symbol": symbol, "timeframe": timeframe, "rows": rows}
 
 
 def run_backtest(strategy, symbol, timeframe, fresh=False):
@@ -135,16 +195,13 @@ def run_backtest(strategy, symbol, timeframe, fresh=False):
             "ret_pct": _num(tr["ReturnPct"] * 100),
         })
 
-    position = "FLAT"
-    if len(trades):
-        last = trades.iloc[-1]
-        if last["ExitTime"] >= last_bar:
-            position = "LONG" if last["Size"] > 0 else "SHORT"
+    position, last_signal = _position_from_trades(trades, last_bar)
 
     return {
         "candles": candles, "equity": eq_points, "markers": markers,
         "trades": trade_rows[-12:][::-1],
         "position": position,
+        "last_signal": last_signal,
         "last_candle": str(last_bar),
         "stats": {
             "Return %": _num(stats["Return [%]"]),
@@ -185,6 +242,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send({"strategies": sorted(REGISTRY),
                             "symbols": SYMBOLS, "timeframes": TIMEFRAMES,
                             "verdicts": verdicts()})
+            elif url.path == "/api/overview":
+                self._send(overview(
+                    q.get("symbol", "BTC/USDT"), q.get("timeframe", "1d")))
             elif url.path == "/api/run":
                 self._send(run_backtest(
                     q.get("strategy", "devma"), q.get("symbol", "BTC/USDT"),
