@@ -31,3 +31,7 @@ ledger:
 # live charts at http://localhost:8787 (not a ledger row)
 dash:
     {{py}} dashboard.py
+
+# append today's DEVMA long-only 1d position. not a ledger row; does not burn holdout
+log-devma:
+    {{py}} log_devma.py

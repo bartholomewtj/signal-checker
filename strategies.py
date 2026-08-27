@@ -535,6 +535,16 @@ class Devma(Base):
             self.position.close()
 
 
+class DevmaLo(Devma):
+    """Long-only sleeve of Devma.
+
+    Same entries/exits as Devma; shorts disabled. The variant the
+    forward log watches (1d), not a new rule.
+    """
+    direction = "long"
+    GRID = {"vol_ma": [10, 20, 40], "vol_run": [3, 5, 8]}
+
+
 # ---------------------------------------------------------------------------
 # 8. Combo - DEVMA chassis plus the Diamond Hands sweep as a second entry
 
@@ -1087,6 +1097,7 @@ REGISTRY = {
     "open_rejection": OpenRejection,
     "vwap_rejection": VWAPRejection,
     "devma": Devma,
+    "devma_lo": DevmaLo,
     "combo": Combo,
     "liq_flush": LiqFlush,
     "break_retest": BreakRetest,
