@@ -4,17 +4,8 @@ report*.txt
 holdout_*.txt
 last_run.html
 
-# sssf runtime
-adws/adw_data/sessions/
-adws/adw_data/sssf.db*
 .env
 *.pyc
-
-# Factory stays on this machine; not on GitHub
-/adws/
-/specs/
-/requests/
-/app_docs/
 
 # Public-repo extras moved off GitHub
 /archive/
