@@ -9,3 +9,14 @@ last_run.html
 
 # Public-repo extras moved off GitHub
 /archive/
+
+# Local research scratch
+/research/
+*.bak_*
+*.png
+*_last_run.json
+last_run.json
+autoresearch.db
+autoresearch_results.tsv
+/reports/
+/_*.py
